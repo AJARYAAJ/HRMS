@@ -24,9 +24,10 @@ const normDomain = (d) => String(d || '').trim().toLowerCase().replace(/^[a-z]+:
 export const ACTIVITY_DEFAULTS = {
   screenshots_enabled: '0', screenshot_interval_mins: '10', idle_alert_minutes: '30',
   unproductive_alert_minutes: '60', overwork_hours: '10', activity_attendance: '1', live_window_minutes: '3',
+  idle_threshold_seconds: '120', away_after_minutes: '60',
 };
 export function activitySettings() {
-  const saved = Object.fromEntries(all("SELECT key, value FROM settings WHERE key LIKE 'activity_%' OR key IN ('screenshots_enabled','screenshot_interval_mins','idle_alert_minutes','unproductive_alert_minutes','overwork_hours','live_window_minutes')").map((r) => [r.key, r.value]));
+  const saved = Object.fromEntries(all("SELECT key, value FROM settings WHERE key LIKE 'activity_%' OR key IN ('screenshots_enabled','screenshot_interval_mins','idle_alert_minutes','unproductive_alert_minutes','overwork_hours','live_window_minutes','idle_threshold_seconds','away_after_minutes')").map((r) => [r.key, r.value]));
   return { ...ACTIVITY_DEFAULTS, ...saved };
 }
 
@@ -112,6 +113,7 @@ agentRouter.get('/config', (req, res) => {
   res.json({
     employee_id: req.device.employee_id, device_id: req.device.id, heartbeat_seconds: 60,
     screenshots_enabled: s.screenshots_enabled === '1', screenshot_interval_mins: Number(s.screenshot_interval_mins),
+    idle_threshold_seconds: Number(s.idle_threshold_seconds), away_after_minutes: Number(s.away_after_minutes),
   });
 });
 
@@ -138,6 +140,13 @@ agentRouter.post('/heartbeat', (req, res) => {
       dates.add(local.slice(0, 10));
     }
     run("UPDATE agent_devices SET last_seen_at = datetime('now') WHERE id = ?", req.device.id);
+    // The desktop agent reports its version, OS and machine name so IT can see what's deployed.
+    const a = req.body?.agent;
+    if (a && typeof a === 'object') {
+      const clip = (v, n) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);
+      run('UPDATE agent_devices SET agent_version = COALESCE(?, agent_version), os = COALESCE(?, os), hostname = COALESCE(?, hostname) WHERE id = ?',
+        clip(a.version, 40), clip(a.os, 40), clip(a.hostname, 100), req.device.id);
+    }
     for (const d of dates) rollupDay(employeeId, d);
     // Auto attendance: the first activity of the day clocks the employee in (if they haven't already).
     if (activitySettings().activity_attendance === '1' && dates.has(today())) {
@@ -167,7 +176,7 @@ activityRouter.get('/devices', (req, res) => {
   const where = isHR(req.user) ? (req.query.employee_id ? 'WHERE d.employee_id = ?' : '') : 'WHERE d.employee_id = ?';
   const params = isHR(req.user) ? (req.query.employee_id ? [req.query.employee_id] : []) : [req.user.id];
   res.json(all(
-    `SELECT d.id, d.employee_id, d.name, d.platform, d.last_seen_at, d.revoked, d.created_at, ${NAME('e')} AS employee_name, e.avatar_color
+    `SELECT d.id, d.employee_id, d.name, d.platform, d.agent_version, d.os, d.hostname, d.last_seen_at, d.revoked, d.created_at, ${NAME('e')} AS employee_name, e.avatar_color
      FROM agent_devices d JOIN employees e ON e.id = d.employee_id ${where} ORDER BY d.id DESC`, ...params,
   ));
 });
@@ -258,7 +267,7 @@ activityRouter.get('/employee/:id', (req, res) => {
     trend: all('SELECT date, productive_mins, neutral_mins, unproductive_mins, idle_mins FROM productivity WHERE employee_id = ? AND date BETWEEN ? AND ? ORDER BY date', id, ymd(trendFrom), date),
     alerts: all('SELECT * FROM activity_alerts WHERE employee_id = ? ORDER BY date DESC, id DESC LIMIT 20', id),
     screenshots: canSeeShots ? all("SELECT id, original_name, mime_type, size, created_at FROM attachments WHERE entity = 'screenshots' AND entity_id = ? AND substr(created_at, 1, 10) = ? ORDER BY id DESC LIMIT 60", id, date) : [],
-    devices: all('SELECT id, name, platform, last_seen_at, revoked FROM agent_devices WHERE employee_id = ? ORDER BY id DESC', id),
+    devices: all('SELECT id, name, platform, agent_version, os, hostname, last_seen_at, revoked FROM agent_devices WHERE employee_id = ? ORDER BY id DESC', id),
   });
 });
 
@@ -349,6 +358,8 @@ activityRouter.put('/settings', requireRole('admin', 'hr'), (req, res) => {
     num('unproductive_alert_minutes', 10, 480);
     num('overwork_hours', 6, 16);
     num('live_window_minutes', 1, 30);
+    num('idle_threshold_seconds', 30, 900);
+    num('away_after_minutes', 5, 480);
   });
   audit(req.user.id, 'update', 'settings', null, { activity: Object.keys(b) });
   res.json(activitySettings());

@@ -1,0 +1,146 @@
+name: Desktop agent
+
+on:
+  push:
+    paths: ['agent/**', 'server/src/routes/activity.js', 'server/src/routes/agentDownloads.js', 'scripts/ci/**', '.github/workflows/agent.yml']
+  pull_request:
+    paths: ['agent/**', 'server/src/routes/activity.js', 'server/src/routes/agentDownloads.js', 'scripts/ci/**', '.github/workflows/agent.yml']
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Go tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: agent/go.mod
+      - run: go vet ./...
+      - run: go test -v -count=1 ./...
+
+  install:
+    name: Install & report (${{ matrix.os }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      HRMS_URL: http://localhost:4000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: agent/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run agent:build
+
+      - name: Start PeopleHub (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          RESET_DB=1 PORT=4000 nohup node --no-warnings server/src/index.js > server.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf $HRMS_URL/api/health && break; sleep 1; done
+      - name: Start PeopleHub (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:RESET_DB = '1'; $env:PORT = '4000'
+          Start-Process node -ArgumentList '--no-warnings', 'server/src/index.js' -RedirectStandardOutput server.log -RedirectStandardError server.err.log -WindowStyle Hidden
+          for ($i = 0; $i -lt 60; $i++) { try { Invoke-RestMethod "$env:HRMS_URL/api/health" | Out-Null; break } catch { Start-Sleep 1 } }
+
+      - name: Register a device
+        shell: bash
+        run: node scripts/ci/agent-register.mjs >> "$GITHUB_ENV"
+
+      - name: Install with the one-line installer (macOS)
+        if: runner.os == 'macOS'
+        run: curl -fsSL $HRMS_URL/api/agent-downloads/install.sh | PEOPLEHUB_TOKEN="$AGENT_TOKEN" sh
+      - name: Install with the one-line installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PEOPLEHUB_TOKEN = $env:AGENT_TOKEN
+          irm "$env:HRMS_URL/api/agent-downloads/install.ps1" | iex
+
+      - name: Wait for the agent's first upload
+        shell: bash
+        run: node scripts/ci/agent-wait.mjs
+
+      - name: Diagnostics (macOS)
+        if: always() && runner.os == 'macOS'
+        run: |
+          A="$HOME/Library/Application Support/PeopleHub"
+          "$A/peoplehub-agent" status || true
+          "$A/peoplehub-agent" check || true
+          launchctl print gui/$(id -u)/com.peoplehub.agent | head -30 || true
+          cat "$A/agent.log" || true
+          cat "$A/launchd.log" 2>/dev/null || true
+          tail -20 server.log || true
+      - name: Diagnostics (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = "$env:LOCALAPPDATA\PeopleHub\peoplehub-agent.exe"
+          & $exe status | Out-String
+          & $exe check | Out-String
+          Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name PeopleHubAgent -ErrorAction SilentlyContinue | Format-List
+          Get-Content "$env:APPDATA\PeopleHub\agent.log" -ErrorAction SilentlyContinue
+          Get-Content server.log, server.err.log -Tail 20 -ErrorAction SilentlyContinue
+
+      - name: Uninstall (macOS)
+        if: always() && runner.os == 'macOS'
+        run: |
+          A="$HOME/Library/Application Support/PeopleHub"
+          "$A/peoplehub-agent" reset
+          test ! -f "$HOME/Library/LaunchAgents/com.peoplehub.agent.plist"
+      - name: Uninstall (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "$env:LOCALAPPDATA\PeopleHub\peoplehub-agent.exe" reset | Out-String
+          if (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name PeopleHubAgent -ErrorAction SilentlyContinue) { throw 'Run key not removed' }
+
+  build:
+    name: Build binaries
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: agent/go.mod
+      - name: Build
+        working-directory: agent
+        run: go run ./tools/dist -out dist -version "${{ github.event_name == 'release' && github.event.release.tag_name || format('0.0.0-{0}', github.sha) }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peoplehub-agent
+          path: agent/dist/*
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" agent/dist/* --repo "${{ github.repository }}"

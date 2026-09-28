@@ -1,6 +1,8 @@
 // Starts the app for E2E tests together with a real SMTP server that captures outgoing mail.
 // Captured messages are exposed at http://localhost:$MAILBOX_PORT/messages so tests can read them.
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
 import { SMTPServer } from 'smtp-server';
 
 const SMTP_PORT = Number(process.env.E2E_SMTP_PORT || 2526);
@@ -35,4 +37,13 @@ Object.assign(process.env, {
   SMTP_HOST: '127.0.0.1', SMTP_PORT: String(SMTP_PORT), SMTP_FROM: 'PeopleHub HR <hr@peoplehub.demo>',
   MAIL_INTERVAL_MS: '500', APP_URL: `http://localhost:${process.env.PORT}`,
 });
+// Placeholder agent builds so the download list renders without needing Go (the real builds are covered by
+// the Go tests and the agent CI workflow).
+if (process.env.AGENT_DIST_DIR) {
+  fs.mkdirSync(process.env.AGENT_DIST_DIR, { recursive: true });
+  for (const f of ['peoplehub-agent-windows-amd64.exe', 'peoplehub-agent-windows-arm64.exe', 'peoplehub-agent-macos-arm64.zip', 'peoplehub-agent-macos-amd64.zip']) {
+    fs.writeFileSync(path.join(process.env.AGENT_DIST_DIR, f), `placeholder ${f}`);
+  }
+  fs.writeFileSync(path.join(process.env.AGENT_DIST_DIR, 'VERSION'), '1.0.0\n');
+}
 await import('../../server/src/index.js');

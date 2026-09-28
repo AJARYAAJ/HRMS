@@ -103,7 +103,7 @@ Legend: ✅ implemented · ◑ partly implemented (limits noted) · — not impl
 | Screenshots (opt-in, visible to the employee, manager chain and HR) | We360 | ✅ | Activity timeline |
 | Alerts: long idle, unproductive time, overwork/burnout | We360 | ✅ | Productivity → Alerts |
 | Auto clock-in from first activity | We360 | ✅ | Productivity → Settings |
-| Native desktop agent binary | We360 | ◑ | The protocol and a simulator (`npm run agent:simulate`) are provided; there is no packaged Windows/macOS agent |
+| Native desktop agent | We360 | ✅ | `agent/`: Windows and macOS builds with one-line installers, start at login, offline queue, browser domains, screenshots ([agent/README.md](../agent/README.md)). Builds are unsigned: code signing needs your organisation's certificates |
 
 ## Not implemented
 
@@ -112,7 +112,7 @@ Legend: ✅ implemented · ◑ partly implemented (limits noted) · — not impl
 - Statutory e-filing (ECR, challans, TDS returns).
 - Direct bank APIs.
 - Certified Form 16.
-- A packaged desktop agent.
+- Code signing of the desktop agent.
 - SCORM course hosting.
 - AI assistants.
 

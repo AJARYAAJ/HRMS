@@ -5,7 +5,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'peoplehub-modules-'));
-Object.assign(process.env, { DB_PATH: path.join(tmp, 'test.db'), UPLOAD_DIR: path.join(tmp, 'uploads'), CAREERS_RATE_LIMIT: '50' });
+Object.assign(process.env, { DB_PATH: path.join(tmp, 'test.db'), UPLOAD_DIR: path.join(tmp, 'uploads'), CAREERS_RATE_LIMIT: '50', AGENT_DIST_DIR: path.join(tmp, 'agent-dist') });
 delete process.env.SMTP_HOST;
 
 const { seed } = await import('../src/seed.js');
@@ -438,4 +438,54 @@ test('activity agent: device token, classified heartbeats, live board, timeline,
   assert.ok(re.changed >= 1);
   await call('employee', 'DELETE', `activity/devices/${dev.id}`);
   assert.equal((await agent('GET', 'agent/config')).status, 401);
+});
+
+test('desktop agent: reports version/OS/host, idle settings reach the agent, builds and installers are served', async () => {
+  const dev = (await call('employee', 'POST', 'activity/devices', { name: 'MacBook', platform: 'macOS' })).body;
+  const agent = (method, url, body) => call(null, method, url, body, { Authorization: `Device ${dev.token}` });
+  await call('hr', 'PUT', 'activity/settings', { idle_threshold_seconds: 90, away_after_minutes: 45 });
+  const cfg = (await agent('GET', 'agent/config')).body;
+  assert.equal(cfg.idle_threshold_seconds, 90);
+  assert.equal(cfg.away_after_minutes, 45);
+  assert.equal((await call('hr', 'PUT', 'activity/settings', { idle_threshold_seconds: 5 })).status, 400);
+
+  const ts = new Date(Date.now() - 60000).toISOString();
+  const hb = await agent('POST', 'agent/heartbeat', { events: [{ ts, idle_seconds: 60, active_seconds: 0 }], agent: { version: '1.2.3', os: 'darwin/arm64', hostname: 'ananya-mbp' } });
+  assert.equal(hb.status, 202);
+  const row = (await call('employee', 'GET', 'activity/devices')).body.find((d) => d.id === dev.id);
+  assert.deepEqual([row.agent_version, row.os, row.hostname], ['1.2.3', 'darwin/arm64', 'ananya-mbp']);
+  // A heartbeat without agent info keeps what was reported before.
+  await agent('POST', 'agent/heartbeat', { events: [{ ts, app: 'Code', active_seconds: 10 }] });
+  assert.equal(get('SELECT agent_version FROM agent_devices WHERE id = ?', dev.id).agent_version, '1.2.3');
+
+  // Downloads: nothing built yet, then builds appear with size and checksum.
+  assert.deepEqual((await call(null, 'GET', 'agent-downloads')).body.files, []);
+  const dist = process.env.AGENT_DIST_DIR;
+  fs.mkdirSync(dist, { recursive: true });
+  fs.writeFileSync(path.join(dist, 'peoplehub-agent-windows-amd64.exe'), 'MZ fake exe');
+  fs.writeFileSync(path.join(dist, 'peoplehub-agent-macos-arm64.zip'), 'PK fake zip');
+  fs.writeFileSync(path.join(dist, 'VERSION'), '1.2.3\n');
+  fs.writeFileSync(path.join(dist, 'secret.txt'), 'nope');
+  const list = (await call(null, 'GET', 'agent-downloads')).body;
+  assert.equal(list.version, '1.2.3');
+  assert.deepEqual(list.files.map((f) => f.file).sort(), ['peoplehub-agent-macos-arm64.zip', 'peoplehub-agent-windows-amd64.exe']);
+  assert.match(list.files[0].sha256, /^[a-f0-9]{64}$/);
+  const dl = await call(null, 'GET', 'agent-downloads/peoplehub-agent-windows-amd64.exe');
+  assert.equal(dl.status, 200);
+  assert.match(dl.headers.get('content-disposition'), /attachment/);
+  assert.equal((await call(null, 'GET', 'agent-downloads/secret.txt')).status, 404);
+  assert.equal((await call(null, 'GET', 'agent-downloads/peoplehub-agent-macos-amd64.zip')).status, 404);
+
+  const sh = await call(null, 'GET', 'agent-downloads/install.sh');
+  assert.match(sh.body, new RegExp(`SERVER="${base}"`));
+  assert.match(sh.body, /peoplehub-agent-macos-\$ARCH\.zip/);
+  const ps = await call(null, 'GET', 'agent-downloads/install.ps1');
+  assert.match(ps.body, new RegExp(`\\$server = '${base}'`));
+  // A spoofed Host header must never be echoed into the installer scripts (fetch can't set Host, so use http).
+  const http = await import('node:http');
+  const evilStatus = await new Promise((resolve, reject) => {
+    http.get(`${base}/api/agent-downloads/install.sh`, { headers: { Host: "x';rm -rf ~;'" } }, (r) => { r.resume(); resolve(r.statusCode); }).on('error', reject);
+  });
+  assert.equal(evilStatus, 400);
+  await call('hr', 'PUT', 'activity/settings', { idle_threshold_seconds: 120, away_after_minutes: 60 });
 });

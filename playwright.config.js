@@ -25,7 +25,7 @@ export default defineConfig({
     command: 'node --no-warnings e2e/support/server.js',
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: false,
-    env: { PORT: String(PORT), DB_PATH: `${RUN}.db`, UPLOAD_DIR: `${RUN}-uploads`, RESET_DB: '1' },
+    env: { PORT: String(PORT), DB_PATH: `${RUN}.db`, UPLOAD_DIR: `${RUN}-uploads`, AGENT_DIST_DIR: `${RUN}-agent`, RESET_DB: '1' },
     timeout: 60_000,
   },
 });

@@ -25,7 +25,7 @@ hire-to-retire lifecycle, inspired by the best of Keka, Zoho People, We360.ai an
 | **On/offboarding & exit** | Auto-generated checklists, resignations with notice-period LWD and manager → HR approval, exit interviews with analytics, full & final settlement (salary, EL encashment, gratuity, notice and loan recovery) |
 | **Performance** | Goals/OKRs, self → manager reviews, review cycles, continuous feedback with visibility control, 360° feedback requests, one-on-ones with agenda, notes and action items |
 | **Engage** | Announcements, social feed (likes, comments, @mentions), kudos wall, pulse polls, anonymous eNPS with score and breakdown |
-| **Productivity** | We360-style: desktop agent API with device tokens, live active/idle/offline board, per-person hourly timeline, apps & websites, screenshots (opt-in), app classification rules with department overrides, alerts (long idle, unproductive, overwork), auto clock-in |
+| **Productivity** | We360-style: a native desktop agent for Windows and macOS ([agent/README.md](agent/README.md)) with one-line installers, device tokens, live active/idle/offline board, per-person hourly timeline, apps & websites, screenshots (opt-in), app classification rules with department overrides, alerts (long idle, unproductive, overwork), auto clock-in |
 | **Work** | Task kanban across projects, travel requests with advances, unified company calendar |
 | **Learning** | Course catalogue, mandatory compliance training, enrolment & progress, completion tracking |
 | **Helpdesk** | Tickets with priority, assignment, status workflow and attachments; knowledge base with search, helpful votes and article suggestions while raising a ticket |
@@ -42,6 +42,7 @@ hire-to-retire lifecycle, inspired by the best of Keka, Zoho People, We360.ai an
 ```
 client/  React 19 SPA · Redux Toolkit + RTK Query · React Router · Tailwind CSS v4 · Recharts · TanStack Virtual
 server/  Node.js + Express 5 · SQLite (built-in node:sqlite, zero native deps) · JWT auth · bcrypt · Multer uploads · Nodemailer SMTP
+agent/   Desktop activity agent for Windows & macOS (Go, standard library only)
 e2e/     Playwright end-to-end tests (76 tests across all modules and roles, with a real SMTP capture server)
 ```
 
@@ -72,7 +73,14 @@ npm run dev
 
 Reset demo data at any time: `npm run seed`.
 
-Simulate desktop activity agents (registers devices and streams heartbeats and screenshots):
+Desktop activity agent for Windows and macOS (needs Go 1.22+ to build; see [agent/README.md](agent/README.md)):
+
+```bash
+npm run agent:build   # builds agent/dist; PeopleHub then offers downloads and one-line installers in Productivity → Devices
+npm run agent:test
+```
+
+Or simulate agents without installing anything (registers devices and streams heartbeats and screenshots):
 
 ```bash
 npm run agent:simulate -- --people 5 --minutes 60 --live

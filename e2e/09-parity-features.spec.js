@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { test, expect } from '@playwright/test';
 import { loginAs, expectToast, dialog, nextWeekday, apiToken, clearMailbox, waitForEmail } from './helpers';
 
@@ -319,13 +320,28 @@ test.describe.serial('Activity monitoring (We360-style)', () => {
     await d.getByRole('button', { name: 'Create token' }).click();
     const token = (await page.getByTestId('device-token').innerText()).trim();
     expect(token).toMatch(/^phd_/);
+    // One-line installers carry this server's address and the new token.
+    await expect(page.getByTestId('install-cmd-windows')).toContainText(`$env:PEOPLEHUB_TOKEN='${token}'; irm http://localhost:4400/api/agent-downloads/install.ps1 | iex`);
+    await expect(page.getByTestId('install-cmd-macos')).toContainText(`curl -fsSL http://localhost:4400/api/agent-downloads/install.sh | PEOPLEHUB_TOKEN='${token}' sh`);
+    const setupFile = page.waitForEvent('download');
+    await page.getByTestId('download-setup-file').click();
+    const file = await setupFile;
+    expect(file.suggestedFilename()).toBe('peoplehub-agent.json');
+    const json = JSON.parse(fs.readFileSync(await file.path(), 'utf8'));
+    expect(json).toMatchObject({ server: 'http://localhost:4400', token, device_name: 'E2E laptop' });
     await page.getByRole('button', { name: 'Done' }).click();
+    await expect(page.getByTestId('agent-download')).toHaveCount(4);
+    const installer = await request.get('/api/agent-downloads/install.sh');
+    expect(await installer.text()).toContain('SERVER="http://localhost:4400"');
 
     const now = Date.now();
     const events = Array.from({ length: 5 }, (_, i) => ({ ts: new Date(now - (5 - i) * 60000).toISOString(), app: 'Visual Studio Code', title: 'E2E', active_seconds: 55, idle_seconds: 5 }));
-    const res = await request.post('/api/agent/heartbeat', { headers: { Authorization: `Device ${token}` }, data: { events } });
+    const res = await request.post('/api/agent/heartbeat', { headers: { Authorization: `Device ${token}` }, data: { events, agent: { version: '1.0.0', os: 'windows/amd64', hostname: 'E2E-PC' } } });
     expect(res.status()).toBe(202);
 
+    await page.reload();
+    await expect(page.getByTestId('table-row').filter({ hasText: 'E2E laptop' })).toContainText('v1.0.0');
+    await expect(page.getByTestId('table-row').filter({ hasText: 'E2E laptop' })).toContainText('E2E-PC');
     await page.getByRole('tab', { name: 'Live' }).click();
     const row = page.getByTestId('table-row').filter({ hasText: 'Aarav Sharma' });
     await expect(row).toContainText('active');

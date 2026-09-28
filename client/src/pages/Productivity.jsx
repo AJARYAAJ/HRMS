@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Activity, Gauge, Clock, Coffee, ThumbsDown, AppWindow, Radio, BellRing, ListChecks, Monitor, Settings2, Plus, Trash2, RefreshCw, Copy, Check, KeyRound, Save, CircleDot, Moon, PowerOff } from 'lucide-react';
+import { Activity, Gauge, Clock, Coffee, ThumbsDown, AppWindow, Radio, BellRing, ListChecks, Monitor, Settings2, Plus, Trash2, RefreshCw, Copy, Check, KeyRound, Save, Download, CircleDot, Moon, PowerOff } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { useGet, useAction, useAuth, useDisclosure, useToast } from '../lib/hooks';
 import { PageHeader, StatCard, StatSkeletons, Avatar, CardSkeleton, Badge, Tabs, Modal, Confirm, EmptyState, cx } from '../components/ui';
@@ -184,34 +184,80 @@ function Rules() {
   );
 }
 
+function CopyField({ label, value, testId }) {
+  const toast = useToast();
+  const [copied, setCopied] = useState(false);
+  const copy = async () => { try { await navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { toast('Copy failed — select the text and copy it manually', 'error'); } };
+  return (
+    <div>
+      <div className="mb-1 text-xs font-semibold muted">{label}</div>
+      <div className="flex items-start gap-2 rounded-xl bg-slate-900 p-3 text-slate-100">
+        <code className="flex-1 break-all font-mono text-[11px] leading-relaxed" data-testid={testId}>{value}</code>
+        <button type="button" className="btn-sm shrink-0 rounded-lg bg-white/10 px-2 py-1 text-xs font-semibold hover:bg-white/20" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
+      </div>
+    </div>
+  );
+}
+
+const fmtMB = (n) => `${(n / 1e6).toFixed(1)} MB`;
+
+function AgentDownloads() {
+  const { data, isLoading } = useGet('agent-downloads');
+  return (
+    <div className="card card-pad text-sm" data-testid="agent-downloads">
+      <h3 className="mb-1 flex items-center gap-2 font-semibold"><Download size={16} className="text-brand-500" /> Desktop agent{data?.version ? ` ${data.version}` : ''}</h3>
+      <p className="muted">Runs quietly in the background on Windows and macOS and starts at login.</p>
+      <div className="mt-3 space-y-2">
+        {isLoading ? <CardSkeleton lines={3} className="!border-0 !p-0 !shadow-none" /> : data.files.length === 0 ? (
+          <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">No agent builds on this server yet. Build them with <code>npm run agent:build</code> (needs Go 1.22+).</p>
+        ) : data.files.map((f) => (
+          <a key={f.file} href={f.url} download className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 transition hover:border-brand-400 dark:border-slate-700" data-testid="agent-download" title={`SHA-256 ${f.sha256}`}>
+            <span className="font-medium">{f.label}</span><span className="text-xs muted">{fmtMB(f.size)}</span>
+          </a>
+        ))}
+      </div>
+      <p className="mt-3 text-xs muted">Register a device to get its install command. Admins can also run <code>peoplehub-agent setup --server &lt;url&gt; --token &lt;token&gt;</code>.</p>
+    </div>
+  );
+}
+
 function Devices() {
   const { isHR } = useAuth();
   const { data = [], isLoading } = useGet('activity/devices');
   const [act] = useAction();
-  const toast = useToast();
   const form = useDisclosure();
   const [token, setToken] = useState(null);
-  const [copied, setCopied] = useState(false);
   const [revoke, setRevoke] = useState(null);
-  const copy = async () => { try { await navigator.clipboard.writeText(token.token); setCopied(true); } catch { toast('Copy failed — select the token and copy it manually', 'error'); } };
+  const origin = window.location.origin;
+  const downloadSetupFile = () => {
+    const blob = new Blob([JSON.stringify({ server: origin, token: token.token, device_name: token.name }, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'peoplehub-agent.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
   return (
     <div className="grid gap-6 xl:grid-cols-3">
       <div className="xl:col-span-2">
-        <DataTable title="Agent devices" loading={isLoading} rows={data} searchKeys={['name', 'employee_name', 'platform']} exportName="agent-devices"
+        <DataTable title="Agent devices" loading={isLoading} rows={data} searchKeys={['name', 'employee_name', 'platform', 'hostname']} exportName="agent-devices"
           toolbar={<button className="btn-primary btn-sm" onClick={() => form.onOpen()} data-testid="add-device"><Plus size={14} /> Register device</button>}
           empty={<EmptyState icon={Monitor} title="No devices registered" message="Register a device to get a token for the desktop agent." />}
           columns={[
-            { key: 'name', header: 'Device', render: (r) => <div><div className="font-semibold">{r.name}</div><div className="text-xs muted">{r.platform || '—'}</div></div> },
+            { key: 'name', header: 'Device', render: (r) => <div className="min-w-0"><div className="truncate font-semibold">{r.name}</div><div className="truncate text-xs muted">{r.hostname || r.platform || '—'}</div></div> },
             { key: 'employee_name', header: 'Employee', render: (r) => <div className="flex items-center gap-2"><Avatar name={r.employee_name} color={r.avatar_color} size="xs" /><span className="truncate">{r.employee_name}</span></div> },
+            { key: 'agent_version', header: 'Agent', render: (r) => (r.agent_version ? <div className="min-w-0"><div className="font-mono text-xs">v{r.agent_version}</div><div className="truncate text-[11px] muted">{r.os}</div></div> : <span className="muted">—</span>) },
             { key: 'last_seen_at', header: 'Last seen', render: (r) => (r.last_seen_at ? timeAgo(r.last_seen_at) : 'Never') },
             { key: 'revoked', header: 'Status', render: (r) => (r.revoked ? <Badge color="slate">revoked</Badge> : <Badge color="green">active</Badge>) },
             { key: '_a', header: '', sortable: false, csv: false, width: '100px', render: (r) => (!r.revoked && <button className="btn-ghost btn-sm text-rose-600" onClick={() => setRevoke(r)} data-testid="revoke-device">Revoke</button>) },
           ]} />
       </div>
-      <div className="card card-pad text-sm">
-        <h3 className="mb-2 flex items-center gap-2 font-semibold"><KeyRound size={16} className="text-brand-500" /> Agent protocol</h3>
-        <p className="muted">The desktop agent authenticates with its device token and posts what was in focus once a minute.</p>
-        <pre className="mt-3 overflow-x-auto rounded-xl bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">{`GET  /api/agent/config
+      <div className="space-y-6">
+        <AgentDownloads />
+        <div className="card card-pad text-sm">
+          <h3 className="mb-2 flex items-center gap-2 font-semibold"><KeyRound size={16} className="text-brand-500" /> Agent protocol</h3>
+          <p className="muted">Other tools can report activity too: authenticate with a device token and post what was in focus once a minute.</p>
+          <pre className="mt-3 overflow-x-auto rounded-xl bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">{`GET  /api/agent/config
 POST /api/agent/heartbeat
 Authorization: Device <token>
 { "events": [{ "ts": "…ISO…",
@@ -219,23 +265,28 @@ Authorization: Device <token>
   "title": "PR #42", "active_seconds": 55,
   "idle_seconds": 5 }] }
 POST /api/agent/screenshot  (multipart "file")`}</pre>
-        <p className="mt-3 muted">Try it locally with <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm run agent:simulate</code>.</p>
+        </div>
       </div>
       <FormModal open={form.open} onClose={form.onClose} title="Register a device" submitLabel="Create token" initial={{ platform: 'Windows' }}
         fields={[
           { name: 'name', label: 'Device name', required: true, placeholder: 'Work laptop' },
-          { name: 'platform', label: 'Platform', type: 'select', noEmpty: true, options: ['Windows', 'macOS', 'Linux'] },
+          { name: 'platform', label: 'Platform', type: 'select', noEmpty: true, options: ['Windows', 'macOS'] },
           ...(isHR ? [{ name: 'employee_id', label: 'Employee (empty = me)', type: 'employee', full: true }] : []),
         ]}
-        onSubmit={async (v) => { const r = await act('activity/devices', { body: v, success: 'Device registered' }); if (r) { setCopied(false); setToken(r); } return r; }} />
-      <Modal open={!!token} onClose={() => setToken(null)} title="Device token" footer={<button className="btn-primary" onClick={() => setToken(null)}>Done</button>}>
+        onSubmit={async (v) => { const r = await act('activity/devices', { body: v, success: 'Device registered' }); if (r) setToken({ ...r, platform: v.platform }); return r; }} />
+      <Modal open={!!token} onClose={() => setToken(null)} title={`Install the agent on ${token?.name || ''}`} size="lg" footer={<button className="btn-primary" onClick={() => setToken(null)}>Done</button>}>
         {token && (
-          <div className="space-y-3 text-sm">
-            <p>Paste this token into the agent on <b>{token.name}</b>. It is shown <b>only once</b> — store it securely.</p>
-            <div className="flex items-center gap-2 rounded-xl bg-slate-100 p-3 dark:bg-slate-800">
-              <code className="flex-1 break-all font-mono text-xs" data-testid="device-token">{token.token}</code>
-              <button className="btn-secondary btn-sm" onClick={copy}>{copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy'}</button>
+          <div className="space-y-4 text-sm">
+            <p>The token below is shown <b>only once</b>. Use one of these options on the computer being set up.</p>
+            <CopyField label="1 · Windows: paste into PowerShell" testId="install-cmd-windows" value={`$env:PEOPLEHUB_TOKEN='${token.token}'; irm ${origin}/api/agent-downloads/install.ps1 | iex`} />
+            <CopyField label="1 · macOS: paste into Terminal" testId="install-cmd-macos" value={`curl -fsSL ${origin}/api/agent-downloads/install.sh | PEOPLEHUB_TOKEN='${token.token}' sh`} />
+            <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+              <div className="text-xs font-semibold muted">2 · Or without a terminal</div>
+              <p className="mt-1">Download the agent (right) and this setup file into the same folder, then open the agent. It installs itself and deletes the setup file.</p>
+              <button className="btn-secondary btn-sm mt-2" onClick={downloadSetupFile} data-testid="download-setup-file"><Download size={14} /> Download setup file</button>
             </div>
+            <CopyField label="Device token" testId="device-token" value={token.token} />
+            <p className="text-xs muted">macOS asks once for Accessibility (window titles), Automation (browser address) and — if screenshots are on — Screen Recording permission. Employees are told what is collected; see Settings for idle and screenshot rules.</p>
           </div>
         )}
       </Modal>
@@ -253,7 +304,7 @@ function ActivitySettings() {
   const v = draft || data;
   if (isLoading || !v) return <CardSkeleton lines={6} />;
   const set = (k) => (e) => setDraft({ ...v, [k]: e.target.type === 'checkbox' ? (e.target.checked ? '1' : '0') : e.target.value });
-  const NUMS = [['screenshot_interval_mins', 'Screenshot interval (minutes)', 1, 120], ['idle_alert_minutes', 'Alert after idle for (minutes)', 5, 240], ['unproductive_alert_minutes', 'Alert after unproductive time (minutes / day)', 10, 480], ['overwork_hours', 'Overwork alert (active hours / day)', 6, 16], ['live_window_minutes', 'Offline after no heartbeat for (minutes)', 1, 30]];
+  const NUMS = [['idle_threshold_seconds', 'Count as idle after no input for (seconds)', 30, 900], ['away_after_minutes', 'Stop recording after idle for (minutes)', 5, 480], ['screenshot_interval_mins', 'Screenshot interval (minutes)', 1, 120], ['idle_alert_minutes', 'Alert after idle for (minutes)', 5, 240], ['unproductive_alert_minutes', 'Alert after unproductive time (minutes / day)', 10, 480], ['overwork_hours', 'Overwork alert (active hours / day)', 6, 16], ['live_window_minutes', 'Offline after no heartbeat for (minutes)', 1, 30]];
   return (
     <form className="card card-pad max-w-2xl space-y-5" onSubmit={async (e) => {
       e.preventDefault();

@@ -4,3 +4,4 @@ server/data
 test-results
 playwright-report
 .env
+agent/dist

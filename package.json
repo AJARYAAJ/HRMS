@@ -14,7 +14,9 @@
     "seed": "npm run seed -w server",
     "test:e2e": "npm run build && playwright test",
     "test:api": "npm test -w server",
-    "agent:simulate": "node scripts/agent-simulator.mjs"
+    "agent:simulate": "node scripts/agent-simulator.mjs",
+    "agent:build": "cd agent && go run ./tools/dist -out dist",
+    "agent:test": "cd agent && go test ./..."
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",

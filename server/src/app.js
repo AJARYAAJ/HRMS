@@ -15,6 +15,7 @@ import { exitRouter, resignationsRouter } from './routes/exit.js';
 import { workforceRouter, attendanceRequestsRouter } from './routes/workforce.js';
 import { peopleRouter } from './routes/people.js';
 import { careersRouter, offersRouter } from './routes/careers.js';
+import { agentDownloadsRouter } from './routes/agentDownloads.js';
 import { workRouter, travelRouter } from './routes/work.js';
 import { agentRouter, activityRouter } from './routes/activity.js';
 import { hrdocsRouter, lettersRouter, letterRequestsRouter, customFieldsRouter, kbRouter } from './routes/hrdocs.js';
@@ -36,6 +37,7 @@ export function createApp() {
   api.post('/auth/reset-password', resetPasswordHandler);
   api.use('/careers', careersRouter); // public careers site
   api.use('/agent', agentRouter); // desktop activity agent (device-token auth)
+  api.use('/agent-downloads', agentDownloadsRouter); // public agent builds and installers
   api.use(authenticate);
   api.use('/auth', authRouter);
   api.use('/employees', employeesRouter);

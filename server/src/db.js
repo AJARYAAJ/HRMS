@@ -22,6 +22,9 @@ export function migrate() {
   addColumn('employees', 'probation_end_date', 'TEXT');
   addColumn('employees', 'confirmation_status', "TEXT DEFAULT 'confirmed'");
   addColumn('employees', 'tax_regime', "TEXT DEFAULT 'new'");
+  addColumn('agent_devices', 'agent_version', 'TEXT');
+  addColumn('agent_devices', 'hostname', 'TEXT');
+  addColumn('agent_devices', 'os', 'TEXT');
   addColumn('locations', 'latitude', 'REAL');
   addColumn('locations', 'longitude', 'REAL');
   addColumn('locations', 'radius_m', 'INTEGER DEFAULT 300');

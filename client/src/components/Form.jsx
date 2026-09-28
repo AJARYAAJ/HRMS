@@ -84,8 +84,9 @@ export function FormFields({ fields, values, setValues }) {
 }
 
 /** Modal wrapping a declarative form. onSubmit(values) should resolve truthy to close. */
-export function FormModal({ open, onClose, title, fields, initial, onSubmit, submitLabel = 'Save', size = 'md', children }) {
+export function FormModal({ open, onClose, title, fields, initial, onSubmit, submitLabel = 'Save', size = 'md', children, onValues }) {
   const [values, setValues] = useState({});
+  useEffect(() => { if (open && onValues) onValues(values); }, [open, values]); // eslint-disable-line react-hooks/exhaustive-deps
   const [busy, setBusy] = useState(false);
   // Initialise only when the dialog opens; parents pass a fresh `initial` object on every render,
   // so depending on it would wipe what the user has typed whenever a background refetch re-renders.

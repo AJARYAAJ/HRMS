@@ -69,7 +69,7 @@ function MyAttendance() {
           <StatCard icon={Percent} label="Attendance" value={`${s.attendance_pct}%`} hint={`${s.present} of ${s.working_days} working days`} />
           <StatCard icon={Timer} tone="sky" label="Avg. hours / day" value={`${s.avg_hours}h`} hint="Based on completed days" />
           <StatCard icon={AlarmClock} tone="amber" label="Late marks" value={s.late} hint={`${s.half_day} half days`} />
-          <StatCard icon={Home} tone="green" label="Remote days" value={s.remote} hint={`${s.leave} leave days`} />
+          <StatCard icon={Home} tone="green" label="Remote days" value={s.remote} hint={`${s.leave} leave days · ${s.overtime_hours}h overtime`} />
         </div>
       )}
       <div className="grid gap-6 xl:grid-cols-3">
@@ -106,6 +106,8 @@ function MyAttendance() {
           { key: 'clock_in', header: 'In' }, { key: 'clock_out', header: 'Out' },
           { key: 'hours', header: 'Hours', sortValue: (r) => hoursBetween(r.clock_in, r.clock_out), render: (r) => (r.clock_out ? `${hoursBetween(r.clock_in, r.clock_out).toFixed(1)}h` : '—'), csv: (r) => (r.clock_out ? hoursBetween(r.clock_in, r.clock_out).toFixed(2) : '') },
           { key: 'work_mode', header: 'Mode', render: (r) => (r.work_mode ? titleCase(r.work_mode) : '—') },
+          { key: 'overtime_mins', header: 'Overtime', render: (r) => (r.overtime_mins ? `${(r.overtime_mins / 60).toFixed(1)}h` : '—'), csv: (r) => r.overtime_mins || 0 },
+          { key: 'geo_status', header: 'Location', render: (r) => (r.geo_status && r.geo_status !== 'unknown' ? <Badge status={r.geo_status}>{r.geo_status === 'inside' ? 'At office' : 'Outside'}</Badge> : '—') },
           { key: 'status', header: 'Status', render: (r) => <div className="flex gap-1"><Badge status={r.status} />{r.late ? <Badge status="late">Late</Badge> : null}</div> },
         ]} />
       <FormModal open={reg.open} onClose={reg.onClose} title="Attendance regularization" submitLabel="Submit request"
@@ -167,6 +169,41 @@ function TeamAttendance() {
   );
 }
 
+const REQ_TYPES = [['wfh', 'Work from home'], ['on_duty', 'On duty (client / field visit)'], ['comp_off', 'Comp-off credit (worked on a weekend/holiday)'], ['overtime', 'Overtime']];
+const REQ_LABEL = Object.fromEntries(REQ_TYPES.map(([k, v]) => [k, v.split(' (')[0]]));
+
+function Requests() {
+  const { data = [], isLoading } = useGet('attendance-requests', { mine: 1 });
+  const [act] = useAction();
+  const add = useDisclosure();
+  const [type, setType] = useState('wfh');
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-2xl text-sm muted">Request work from home or on-duty days in advance, claim a comp-off when you worked on a weekend or holiday, or log approved overtime.</p>
+        <button className="btn-primary" onClick={() => { setType('wfh'); add.onOpen(); }} data-testid="new-attendance-request"><Plus size={16} /> New request</button>
+      </div>
+      <DataTable loading={isLoading} rows={data} maxHeight="460px" exportName="attendance-requests"
+        columns={[
+          { key: 'type', header: 'Type', render: (r) => <span className="font-semibold">{REQ_LABEL[r.type]}</span> },
+          { key: 'date', header: 'Date(s)', render: (r) => `${date(r.date)}${r.end_date && r.end_date !== r.date ? ` → ${date(r.end_date)}` : ''}` },
+          { key: 'hours', header: 'Hours', render: (r) => r.hours ?? '—' },
+          { key: 'reason', header: 'Reason', width: 'minmax(200px, 2fr)' },
+          { key: 'status', header: 'Status', render: (r) => <Badge status={r.status} /> },
+        ]} />
+      <FormModal open={add.open} onClose={add.onClose} title="New attendance request" submitLabel="Submit" initial={{ type, date: todayStr() }}
+        fields={[
+          { name: 'type', label: 'Request type', type: 'select', noEmpty: true, options: REQ_TYPES, full: true },
+          { name: 'date', label: 'Date', type: 'date', required: true },
+          { name: 'end_date', label: 'Until (optional)', type: 'date', hidden: (v) => !['wfh', 'on_duty'].includes(v.type) },
+          { name: 'hours', label: 'Overtime hours', type: 'number', min: 0.5, max: 12, step: 0.5, hidden: (v) => v.type !== 'overtime' },
+          { name: 'reason', label: 'Reason', type: 'textarea', required: true, full: true },
+        ]}
+        onSubmit={(v) => act('attendance-requests', { body: v, success: 'Request sent to your manager' })} />
+    </div>
+  );
+}
+
 export default function Attendance() {
   const { isManager } = useAuth();
   const [params, setParams] = useSearchParams();
@@ -174,8 +211,8 @@ export default function Attendance() {
   return (
     <div>
       <PageHeader icon={Clock} title="Attendance" subtitle="Clock in/out, monthly calendar, regularizations and team presence" />
-      {isManager && <Tabs value={tab} onChange={(t) => setParams({ tab: t })} tabs={[{ value: 'me', label: 'My attendance' }, { value: 'team', label: 'Team attendance' }]} />}
-      {tab === 'team' && isManager ? <TeamAttendance /> : <MyAttendance />}
+      <Tabs value={tab} onChange={(t) => setParams({ tab: t })} tabs={[{ value: 'me', label: 'My attendance' }, { value: 'requests', label: 'Requests' }, ...(isManager ? [{ value: 'team', label: 'Team attendance' }] : [])]} />
+      {tab === 'team' && isManager ? <TeamAttendance /> : tab === 'requests' ? <Requests /> : <MyAttendance />}
     </div>
   );
 }

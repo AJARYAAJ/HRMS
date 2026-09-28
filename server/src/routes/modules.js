@@ -32,7 +32,7 @@ export const designationsRouter = crud({
   select: `SELECT t.*, (SELECT COUNT(*) FROM employees e WHERE e.designation_id = t.id AND e.status != 'exited') AS headcount FROM designations t`,
 });
 export const locationsRouter = crud({
-  table: 'locations', label: 'location', fields: ['name', 'city', 'state', 'address'], readAll: true, order: 't.name',
+  table: 'locations', label: 'location', fields: ['name', 'city', 'state', 'address', 'latitude', 'longitude', 'radius_m'], readAll: true, order: 't.name',
   select: `SELECT t.*, (SELECT COUNT(*) FROM employees e WHERE e.location_id = t.id AND e.status != 'exited') AS headcount FROM locations t`,
 });
 

@@ -16,3 +16,8 @@ createRoot(document.getElementById('root')).render(
     </Provider>
   </StrictMode>,
 );
+
+// Installable PWA: register the service worker in production builds only (dev uses Vite's HMR).
+if (import.meta.env.PROD && 'serviceWorker' in navigator && !navigator.webdriver) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}

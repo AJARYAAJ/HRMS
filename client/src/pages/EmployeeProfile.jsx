@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Mail, Phone, MapPin, Briefcase, Calendar, Pencil, UserMinus, KeyRound, Building2, User, Landmark, Laptop, FileText, Clock, ArrowLeft } from 'lucide-react';
+import { Mail, Phone, MapPin, Briefcase, Calendar, Pencil, UserMinus, KeyRound, Building2, User, Landmark, Laptop, FileText, Clock, ArrowLeft, FileSignature, ListPlus } from 'lucide-react';
 import { useGet, useAction, useAuth, useDisclosure } from '../lib/hooks';
 import { Avatar, Badge, Tabs, Skeleton, CardSkeleton, EmptyState, Modal, MonthPicker, Progress } from '../components/ui';
 import { FormModal } from '../components/Form';
@@ -97,6 +97,11 @@ export default function EmployeeProfile() {
   const { data: e, isLoading, error } = useGet(`employees/${id}`);
   const [tab, setTab] = useState('overview');
   const edit = useDisclosure();
+  const letter = useDisclosure();
+  const customEdit = useDisclosure();
+  const { data: templates = [] } = useGet(isHR ? 'letter-templates' : null);
+  const [letterForm, setLetterForm] = useState({ template_id: '', purpose: '' });
+  const [letterPreview, setLetterPreview] = useState('');
   const offboard = useDisclosure();
   const [exitDate, setExitDate] = useState(todayStr());
   const [reason, setReason] = useState('Resignation');
@@ -139,6 +144,7 @@ export default function EmployeeProfile() {
           {isHR && (
             <div className="flex flex-wrap gap-2">
               <button className="btn-secondary btn-sm" onClick={() => edit.onOpen()} data-testid="edit-employee"><Pencil size={14} /> Edit</button>
+              <button className="btn-secondary btn-sm" onClick={() => { setLetterForm({ template_id: '', purpose: '' }); setLetterPreview(''); letter.onOpen(); }} data-testid="generate-letter"><FileSignature size={14} /> Generate letter</button>
               <button className="btn-secondary btn-sm" onClick={() => act(`employees/${e.id}/reset-password`, { body: {}, success: 'Password reset to Welcome@123' })}><KeyRound size={14} /> Reset password</button>
               {e.status === 'active' && !self && <button className="btn-secondary btn-sm text-rose-600" onClick={() => offboard.onOpen()}><UserMinus size={14} /> Offboard</button>}
             </div>
@@ -156,6 +162,8 @@ export default function EmployeeProfile() {
           <div className="space-y-6 xl:col-span-2">
             <Panel title="Job information" icon={Briefcase}>
               <Info label="Employee ID" value={e.emp_code} /><Info label="Designation" value={e.designation} /><Info label="Department" value={e.department} />
+              <Info label="Company" value={e.company_name} />
+              <Info label="Probation" value={e.confirmation_status === 'confirmed' ? 'Confirmed' : <span className="flex items-center gap-2"><Badge status={e.confirmation_status} /> until {date(e.probation_end_date)}</span>} />
               <Info label="Reporting manager" value={e.manager_id ? <Link className="text-brand-600 hover:underline" to={`/employees/${e.manager_id}`}>{e.manager_name}</Link> : '—'} />
               <Info label="Employment type" value={e.employment_type} /><Info label="Shift" value={e.shift} />
               <Info label="Date of joining" value={date(e.date_of_joining)} /><Info label="Tenure" value={`${tenure.toFixed(1)} years`} />
@@ -166,6 +174,17 @@ export default function EmployeeProfile() {
               {canSeePrivate && <><Info label="Blood group" value={e.blood_group} /><Info label="Marital status" value={e.marital_status} />
                 <Info label="Emergency contact" value={e.emergency_contact} /><Info label="Address" value={e.address} /></>}
             </Panel>
+            {e.custom_fields?.length > 0 && (
+              <div className="card card-pad">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 font-semibold"><ListPlus size={16} className="text-brand-500" /> Additional information</h3>
+                  {(isHR || (self && e.custom_fields.some((f) => f.employee_editable))) && <button className="btn-ghost btn-sm" onClick={() => customEdit.onOpen()} data-testid="edit-custom"><Pencil size={13} /> Edit</button>}
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="custom-fields">
+                  {e.custom_fields.map((f) => <Info key={f.id} label={f.label} value={f.type === 'date' ? (f.value ? date(f.value) : '') : f.value} />)}
+                </div>
+              </div>
+            )}
             {canSeePrivate && (
               <Panel title="Payroll & statutory" icon={Landmark}>
                 <Info label="Annual CTC" value={money(e.annual_ctc)} /><Info label="PAN" value={e.pan} /><Info label="UAN" value={e.uan} />
@@ -199,6 +218,40 @@ export default function EmployeeProfile() {
       {tab === 'assets' && <AssetsTab id={e.id} />}
       {tab === 'documents' && <DocumentsTab id={e.id} />}
 
+      <FormModal open={customEdit.open} onClose={customEdit.onClose} title="Additional information" size="lg"
+        initial={Object.fromEntries((e.custom_fields || []).map((f) => [f.field_key, f.value ?? '']))}
+        fields={(e.custom_fields || []).filter((f) => isHR || f.employee_editable).map((f) => ({
+          name: f.field_key, label: f.label, required: !!f.required, full: f.type === 'textarea',
+          type: f.type === 'select' ? 'select' : f.type, options: f.options || undefined,
+        }))}
+        onSubmit={(v) => (isHR
+          ? act(`employees/${e.id}`, { method: 'PUT', body: { custom: v }, success: 'Details saved' })
+          : act('auth/profile', { method: 'PUT', body: { custom: v }, success: 'Details saved', invalidates: ['employees'] }))} />
+      <Modal open={letter.open} onClose={letter.onClose} title={`Generate letter · ${name}`} size="lg">
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div><label className="label" htmlFor="letter-template">Template</label>
+              <select id="letter-template" className="input" value={letterForm.template_id} onChange={async (ev) => {
+                const v = ev.target.value;
+                setLetterForm((f) => ({ ...f, template_id: v }));
+                if (v) { const r = await act('hr/letters/preview', { body: { template_id: v, employee_id: e.id, purpose: letterForm.purpose } }); setLetterPreview(r?.text || ''); }
+              }}>
+                <option value="">Select a template</option>
+                {templates.filter((t) => t.type !== 'offer').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select></div>
+            <div><label className="label" htmlFor="letter-purpose">Purpose (if the template uses it)</label>
+              <input id="letter-purpose" className="input" value={letterForm.purpose} onChange={(ev) => setLetterForm((f) => ({ ...f, purpose: ev.target.value }))} placeholder="e.g. visa application" /></div>
+          </div>
+          <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 font-sans text-sm dark:bg-slate-800/60" data-testid="letter-preview">{letterPreview || 'Choose a template to preview the letter.'}</pre>
+          <div className="flex justify-end gap-2">
+            <button className="btn-secondary" onClick={letter.onClose}>Cancel</button>
+            <button className="btn-primary" disabled={!letterForm.template_id} data-testid="confirm-generate"
+              onClick={async () => { if (await act('hr/letters/generate', { body: { template_id: letterForm.template_id, employee_id: e.id, purpose: letterForm.purpose }, success: 'Letter generated and emailed as PDF' })) letter.onClose(); }}>
+              <FileSignature size={16} /> Generate PDF & email
+            </button>
+          </div>
+        </div>
+      </Modal>
       <FormModal open={edit.open} onClose={edit.onClose} title={`Edit ${name}`} size="lg" fields={employeeFields(isAdmin)} initial={e}
         onSubmit={(v) => act(`employees/${e.id}`, { method: 'PUT', body: v, success: 'Employee updated', invalidates: [`employees`] })} />
       <Modal open={offboard.open} onClose={offboard.onClose} title={`Offboard ${name}`} size="sm"

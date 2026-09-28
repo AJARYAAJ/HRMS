@@ -90,13 +90,15 @@ const STATUS_COLOR = {
   pending: 'amber', processed: 'blue', in_progress: 'blue', manager_review: 'violet', self_review: 'amber', scheduled: 'blue',
   half_day: 'amber', late: 'amber', on_notice: 'amber', at_risk: 'amber', on_hold: 'amber', screening: 'blue', interview: 'violet', enrolled: 'slate',
   rejected: 'red', absent: 'red', exited: 'red', cancelled: 'slate', behind: 'red', in_repair: 'amber', retired: 'slate', high: 'red', urgent: 'red',
+  manager_approved: 'violet', withdrawn: 'slate', reimbursed: 'green', draft: 'slate', probation: 'amber', extended: 'amber', confirmed: 'green',
+  todo: 'slate', review: 'violet', done: 'green', inside: 'green', outside: 'amber', idle: 'amber', offline: 'slate', productive: 'green', unproductive: 'red', neutral: 'blue',
   sent: 'green', logged: 'blue', queued: 'slate', retrying: 'amber', failed: 'red',
   medium: 'amber', low: 'slate', leave: 'violet', holiday: 'blue', remote: 'blue', applied: 'slate', admin: 'violet', hr: 'blue', manager: 'amber', employee: 'slate',
 };
-export function Badge({ children, color, status, className = '' }) {
+export function Badge({ children, color, status, className = '', ...rest }) {
   const key = color || STATUS_COLOR[status] || 'slate';
   return (
-    <span className={cx('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset whitespace-nowrap', STATUS_STYLES[key], className)}>
+    <span {...rest} className={cx('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset whitespace-nowrap', STATUS_STYLES[key], className)}>
       {children ?? titleCase(status)}
     </span>
   );

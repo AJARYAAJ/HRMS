@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { PartyPopper, Award, Plus, Pin, Trash2 } from 'lucide-react';
+import { PartyPopper, Award, Plus, Pin, Trash2, Heart, MessageCircle, Send, Smile } from 'lucide-react';
 import { useGet, useAction, useAuth, useDisclosure } from '../lib/hooks';
+import { useChartTheme } from '../lib/chart';
 import { PageHeader, Tabs, Avatar, Badge, CardSkeleton, EmptyState, cx } from '../components/ui';
 import { FormModal } from '../components/Form';
 import { timeAgo } from '../lib/format';
@@ -78,12 +79,14 @@ function Polls() {
   const { data = [], isLoading } = useGet('surveys');
   const [act] = useAction();
   const add = useDisclosure();
+  const enps = useDisclosure();
   return (
     <div className="space-y-4">
-      {isHR && <div className="flex justify-end"><button className="btn-primary" onClick={() => add.onOpen()}><Plus size={16} /> New poll</button></div>}
+      {isHR && <div className="flex justify-end gap-2"><button className="btn-secondary" onClick={() => enps.onOpen()} data-testid="new-enps"><Smile size={16} /> New eNPS survey</button><button className="btn-primary" onClick={() => add.onOpen()}><Plus size={16} /> New poll</button></div>}
       {isLoading ? <CardSkeleton lines={4} /> : (
         <div className="grid gap-4 md:grid-cols-2">
           {data.map((p) => {
+            if (p.type === 'enps') return <Enps key={p.id} p={p} />;
             const total = p.counts.reduce((a, b) => a + b, 0);
             return (
               <div key={p.id} className="card card-pad" data-testid="poll">
@@ -112,19 +115,122 @@ function Polls() {
       <FormModal open={add.open} onClose={add.onClose} title="Create poll"
         fields={[{ name: 'question', label: 'Question', required: true, full: true }, { name: 'options', label: 'Options (one per line)', type: 'textarea', required: true, full: true }]}
         onSubmit={(v) => act('surveys', { body: { question: v.question, options: String(v.options || '').split('\n') }, success: 'Poll published' })} />
+      <FormModal open={enps.open} onClose={enps.onClose} title="Launch eNPS survey" submitLabel="Launch" initial={{ question: 'How likely are you to recommend working here to a friend?' }}
+        fields={[{ name: 'question', label: 'Question', required: true, full: true, hint: 'Employees answer 0–10 anonymously. eNPS = % promoters (9–10) − % detractors (0–6).' }]}
+        onSubmit={(v) => act('surveys', { body: { question: v.question, type: 'enps' }, success: 'eNPS survey launched' })} />
     </div>
   );
 }
 
+function Enps({ p }) {
+  const { isHR } = useAuth();
+  const [act] = useAction();
+  const chart = useChartTheme();
+  const b = p.breakdown;
+  const pct = (n) => (b.total ? Math.round((n / b.total) * 100) : 0);
+  return (
+    <div className="card card-pad md:col-span-2" data-testid="enps-survey">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div><Badge color="violet">eNPS · anonymous</Badge><h3 className="mt-2 font-semibold">{p.question}</h3></div>
+        {!p.active && <Badge color="slate">Closed</Badge>}
+      </div>
+      <div className="mt-4 grid grid-cols-11 gap-1.5" role="radiogroup" aria-label="Score from 0 to 10">
+        {p.options.map((o, i) => (
+          <button key={o} disabled={!p.active} role="radio" aria-checked={p.my_vote === i} data-testid={`enps-${i}`}
+            onClick={() => act(`surveys/${p.id}/vote`, { body: { option_index: i }, success: 'Thanks — your response is anonymous' })}
+            className={cx('rounded-lg border py-2 text-sm font-bold transition', p.my_vote === i ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-200 hover:border-brand-400 dark:border-slate-700')}>{o}</button>
+        ))}
+      </div>
+      <div className="mt-1 flex justify-between text-[11px] muted"><span>Not likely</span><span>Extremely likely</span></div>
+      {(isHR || p.my_vote !== null) && b.total > 0 && (
+        <div className="mt-5 grid gap-4 sm:grid-cols-[auto,1fr] sm:items-center">
+          <div className="text-center"><div className="text-4xl font-extrabold" data-testid="enps-score">{p.enps > 0 ? `+${p.enps}` : p.enps}</div><div className="text-xs muted">eNPS · {b.total} responses</div></div>
+          <div>
+            <div className="flex h-3 gap-0.5 overflow-hidden rounded-full">
+              {[['promoters', 2], ['passives', 6], ['detractors', 7]].map(([k, c]) => <div key={k} style={{ width: `${pct(b[k])}%`, background: chart.series[c] }} title={`${k}: ${b[k]}`} />)}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-4 text-xs">
+              {[['Promoters (9–10)', 'promoters', 2], ['Passives (7–8)', 'passives', 6], ['Detractors (0–6)', 'detractors', 7]].map(([l, k, c]) => <span key={k} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: chart.series[c] }} />{l}: <b>{pct(b[k])}%</b></span>)}
+            </div>
+          </div>
+        </div>
+      )}
+      {isHR && <div className="mt-3 text-right"><button className="text-xs font-semibold text-brand-600" onClick={() => act(`surveys/${p.id}`, { method: 'PUT', body: { active: !p.active } })}>{p.active ? 'Close survey' : 'Reopen'}</button></div>}
+    </div>
+  );
+}
+
+function Post({ p }) {
+  const { user, isHR } = useAuth();
+  const [act] = useAction();
+  const [comment, setComment] = useState('');
+  const [showAll, setShowAll] = useState(false);
+  const comments = showAll ? p.comments : p.comments.slice(-2);
+  const render = (text) => text.split(/(@[A-Z][a-z]+ [A-Z][a-z]+)/g).map((part, i) => (part.startsWith('@') ? <span key={i} className="font-semibold text-brand-600">{part}</span> : part));
+  return (
+    <div className="card card-pad" data-testid="post">
+      <div className="flex items-center gap-3">
+        <Avatar name={p.author_name} color={p.avatar_color} />
+        <div className="min-w-0 flex-1"><div className="font-semibold">{p.author_name}</div><div className="text-xs muted">{p.designation} · {timeAgo(p.created_at)}</div></div>
+        {(p.author_id === user.id || isHR) && <button className="btn-ghost btn-sm !px-1.5 hover:text-rose-500" onClick={() => act(`people/posts/${p.id}`, { method: 'DELETE', success: 'Post deleted' })} aria-label="Delete post"><Trash2 size={15} /></button>}
+      </div>
+      <p className="mt-3 whitespace-pre-wrap text-[15px] leading-relaxed">{render(p.body)}</p>
+      <div className="mt-3 flex items-center gap-4 border-t border-slate-100 pt-3 text-sm dark:border-slate-800">
+        <button className={cx('flex items-center gap-1.5 font-semibold transition', p.liked ? 'text-rose-600' : 'text-slate-500 hover:text-rose-500')} onClick={() => act(`people/posts/${p.id}/like`, { invalidates: ['people'] })} data-testid="like-post" aria-pressed={p.liked}>
+          <Heart size={16} className={p.liked ? 'fill-current' : ''} /> {p.likes}
+        </button>
+        <span className="flex items-center gap-1.5 text-slate-500"><MessageCircle size={16} /> {p.comment_count}</span>
+      </div>
+      {p.comments.length > 2 && !showAll && <button className="mt-2 text-xs font-semibold text-brand-600" onClick={() => setShowAll(true)}>View all {p.comments.length} comments</button>}
+      <div className="mt-2 space-y-2">
+        {comments.map((c) => (
+          <div key={c.id} className="flex gap-2" data-testid="comment">
+            <Avatar name={c.author_name} color={c.avatar_color} size="xs" />
+            <div className="group min-w-0 flex-1 rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800/60">
+              <div className="flex items-center justify-between"><b className="text-xs">{c.author_name}</b>{(c.author_id === user.id || isHR) && <button className="opacity-0 transition group-hover:opacity-100" onClick={() => act(`people/comments/${c.id}`, { method: 'DELETE' })} aria-label="Delete comment"><Trash2 size={12} /></button>}</div>
+              {render(c.body)}
+            </div>
+          </div>
+        ))}
+      </div>
+      <form className="mt-3 flex gap-2" onSubmit={async (e) => { e.preventDefault(); if (comment.trim() && await act(`people/posts/${p.id}/comments`, { body: { body: comment } })) setComment(''); }}>
+        <input className="input !py-1.5 text-sm" placeholder="Write a comment…" value={comment} onChange={(e) => setComment(e.target.value)} aria-label="Comment" maxLength={1000} />
+        <button className="btn-secondary btn-sm" disabled={!comment.trim()} aria-label="Send comment" data-testid="send-comment"><Send size={14} /></button>
+      </form>
+    </div>
+  );
+}
+
+function Feed() {
+  const { user } = useAuth();
+  const { data = [], isLoading } = useGet('people/posts');
+  const [act, { isLoading: posting }] = useAction();
+  const [body, setBody] = useState('');
+  return (
+    <div className="mx-auto max-w-2xl space-y-4">
+      <form className="card card-pad" onSubmit={async (e) => { e.preventDefault(); if (await act('people/posts', { body: { body }, success: 'Posted' })) setBody(''); }}>
+        <div className="flex gap-3">
+          <Avatar name={`${user.first_name} ${user.last_name}`} color={user.avatar_color} />
+          <textarea className="input min-h-20 flex-1" placeholder="Share an update, a win or a thank-you… mention people with @First Last" value={body} onChange={(e) => setBody(e.target.value)} maxLength={2000} aria-label="New post" data-testid="post-body" />
+        </div>
+        <div className="mt-3 flex items-center justify-between"><span className="text-xs muted">{body.length}/2000</span><button className="btn-primary btn-sm" disabled={!body.trim() || posting} data-testid="publish-post"><Send size={14} /> Post</button></div>
+      </form>
+      {isLoading ? <CardSkeleton lines={4} /> : data.length === 0 ? <div className="card"><EmptyState icon={MessageCircle} title="No posts yet" message="Be the first to share something with the company." /></div> : data.map((p) => <Post key={p.id} p={p} />)}
+    </div>
+  );
+}
+
+const ENGAGE_TABS = [{ value: 'announcements', label: 'Announcements' }, { value: 'feed', label: 'Feed' }, { value: 'kudos', label: 'Kudos wall' }, { value: 'polls', label: 'Polls & eNPS' }];
+
 export default function Engage() {
-  const [params] = useSearchParams();
-  const [tab, setTab] = useState(params.get('kudos') ? 'kudos' : 'feed');
-  useEffect(() => { if (params.get('kudos')) setTab('kudos'); }, [params]);
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('kudos') ? 'kudos' : ENGAGE_TABS.some((t) => t.value === params.get('tab')) ? params.get('tab') : 'announcements';
   return (
     <div>
-      <PageHeader icon={PartyPopper} title="Engage" subtitle="Announcements, recognition and pulse polls" />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'feed', label: 'Announcements' }, { value: 'kudos', label: 'Kudos wall' }, { value: 'polls', label: 'Polls' }]} />
-      {tab === 'feed' && <Announcements />}
+      <PageHeader icon={PartyPopper} title="Engage" subtitle="Announcements, social feed, recognition, polls and eNPS" />
+      <Tabs value={tab} onChange={(t) => setParams(t === 'announcements' ? {} : { tab: t }, { replace: true })} tabs={ENGAGE_TABS} />
+      {tab === 'announcements' && <Announcements />}
+      {tab === 'feed' && <Feed />}
       {tab === 'kudos' && <Kudos autoOpen={!!params.get('kudos')} />}
       {tab === 'polls' && <Polls />}
     </div>

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Target, Plus, Star, Rocket, ClipboardCheck, Pencil } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Target, Plus, Star, Rocket, ClipboardCheck, Pencil, MessageSquareHeart, Send, Users, CalendarClock, CheckCircle2, X, Lock, Globe, Eye } from 'lucide-react';
 import { useGet, useAction, useAuth, useDisclosure, useToast } from '../lib/hooks';
 import { PageHeader, Tabs, Badge, Progress, Avatar, CardSkeleton, EmptyState, Modal, StatCard, cx } from '../components/ui';
 import DataTable from '../components/DataTable';
-import { FormModal } from '../components/Form';
-import { date } from '../lib/format';
+import { FormModal, EmployeeSelect } from '../components/Form';
+import { date, dateTime, timeAgo } from '../lib/format';
 
 const cycleNow = () => { const d = new Date(); return `H${d.getMonth() < 6 ? 1 : 2} ${d.getFullYear()}`; };
 
@@ -142,13 +143,173 @@ function Reviews() {
   );
 }
 
+const VIS = { recipient: ['Shared with them', Eye], manager: ['Private to their manager', Lock], public: ['Public on profile', Globe] };
+const COMPETENCIES = ['Communication', 'Ownership', 'Collaboration', 'Technical skill', 'Leadership', 'Customer focus'];
+
+function FeedbackCard({ f, showTo }) {
+  const [label, Icon] = VIS[f.visibility] || VIS.recipient;
+  return (
+    <div className="card card-pad" data-testid="feedback-item">
+      <div className="flex items-center gap-3">
+        <Avatar name={f.from_name} color={f.from_color} size="sm" />
+        <div className="min-w-0 flex-1 text-sm"><b>{f.from_name}</b>{showTo && <> → <b>{f.to_name}</b></>}<div className="text-xs muted">{timeAgo(f.created_at)}</div></div>
+        {f.competency && <Badge color="violet">{f.competency}</Badge>}
+      </div>
+      <p className="mt-3 whitespace-pre-wrap text-sm">{f.message}</p>
+      <div className="mt-3 flex items-center gap-1 text-xs muted"><Icon size={12} /> {label}{f.request_id ? ' · 360° response' : ''}</div>
+    </div>
+  );
+}
+
+function Feedback() {
+  const { isManager, user } = useAuth();
+  const [scope, setScope] = useState('received');
+  const { data = [], isLoading } = useGet('people/feedback', { scope });
+  const { data: requests = [] } = useGet('people/feedback/requests');
+  const { data: sent = [] } = useGet('people/feedback/requests', { scope: 'sent' });
+  const [act] = useAction();
+  const give = useDisclosure();
+  const ask = useDisclosure();
+  const [reviewers, setReviewers] = useState([]);
+  const [pick, setPick] = useState(null);
+  const [question, setQuestion] = useState('');
+  const [subject, setSubject] = useState(null);
+  const { data: emps = [] } = useGet('employees');
+  const nameOf = (id) => { const e = emps.find((x) => x.id === id); return e ? `${e.first_name} ${e.last_name}` : ''; };
+  return (
+    <div className="space-y-6">
+      {requests.length > 0 && (
+        <div className="card card-pad border-brand-200 bg-brand-50/50 dark:border-brand-500/30 dark:bg-brand-500/5" data-testid="feedback-requests">
+          <h3 className="mb-3 font-semibold">Feedback requested from you ({requests.length})</h3>
+          <div className="space-y-2">
+            {requests.map((r) => (
+              <div key={r.id} className="flex flex-wrap items-center gap-3 rounded-xl bg-white p-3 dark:bg-slate-900">
+                <Avatar name={r.subject_name} color={r.subject_color} size="sm" />
+                <div className="min-w-0 flex-1 text-sm"><b>{r.subject_name}</b><div className="text-xs muted">Asked by {r.requester_name}{r.question ? ` · “${r.question}”` : ''}</div></div>
+                <button className="btn-primary btn-sm" onClick={() => give.onOpen({ to_id: r.subject_id, request_id: r.id, visibility: 'recipient' })} data-testid="respond-request">Respond</button>
+                <button className="btn-ghost btn-sm" onClick={() => act(`people/feedback/requests/${r.id}/decline`, { success: 'Request declined' })}>Decline</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
+          {[['received', 'Received'], ['given', 'Given'], ...(isManager ? [['team', 'My team']] : []), ['requests', `360° requests (${sent.length})`]].map(([v, l]) => (
+            <button key={v} className={cx('rounded-lg px-3 py-1.5 text-sm font-semibold', scope === v ? 'bg-white shadow-sm dark:bg-slate-700' : 'text-slate-500')} onClick={() => setScope(v)}>{l}</button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <button className="btn-secondary" onClick={() => { setReviewers([]); setQuestion(''); setSubject(null); ask.onOpen(); }} data-testid="request-feedback"><Users size={16} /> Request 360° feedback</button>
+          <button className="btn-primary" onClick={() => give.onOpen({ visibility: 'recipient' })} data-testid="give-feedback"><MessageSquareHeart size={16} /> Give feedback</button>
+        </div>
+      </div>
+      {scope === 'requests' ? (
+        <DataTable rows={sent} searchKeys={['subject_name', 'reviewer_name']} exportName="feedback-requests"
+          empty={<EmptyState icon={Users} title="No requests sent" message="Ask peers for 360° feedback about yourself or your team." />}
+          columns={[
+            { key: 'subject_name', header: 'About' }, { key: 'reviewer_name', header: 'Reviewer' },
+            { key: 'question', header: 'Question', width: 'minmax(200px, 2fr)', render: (r) => r.question || '—' },
+            { key: 'status', header: 'Status', render: (r) => <Badge status={r.status === 'completed' ? 'approved' : r.status === 'declined' ? 'rejected' : 'pending'}>{r.status}</Badge> },
+            { key: 'created_at', header: 'Sent', render: (r) => timeAgo(r.created_at) },
+          ]} />
+      ) : isLoading ? <CardSkeleton lines={4} /> : data.length === 0 ? <div className="card"><EmptyState icon={MessageSquareHeart} title="No feedback yet" message="Continuous feedback helps people grow between review cycles." /></div> : (
+        <div className="grid gap-4 md:grid-cols-2">{data.map((f) => <FeedbackCard key={f.id} f={f} showTo={scope !== 'received'} />)}</div>
+      )}
+      <FormModal open={give.open} onClose={give.onClose} title={give.payload?.request_id ? 'Respond to feedback request' : 'Give feedback'} submitLabel="Send feedback" initial={give.payload || {}}
+        fields={[
+          { name: 'to_id', label: 'To', type: 'employee', required: true, full: true, filter: (e) => e.id !== user.id },
+          { name: 'competency', label: 'Competency', type: 'select', options: COMPETENCIES },
+          { name: 'visibility', label: 'Visibility', type: 'select', noEmpty: true, options: Object.entries(VIS).map(([k, [l]]) => [k, l]) },
+          { name: 'message', label: 'Feedback', type: 'textarea', required: true, full: true, placeholder: 'Be specific: what happened, the impact, and what to keep or change.' },
+        ]}
+        onSubmit={(v) => act('people/feedback', { body: v, success: 'Feedback sent' })} />
+      <Modal open={ask.open} onClose={ask.onClose} title="Request 360° feedback"
+        footer={<><button className="btn-secondary" onClick={ask.onClose}>Cancel</button><button className="btn-primary" disabled={!reviewers.length} data-testid="send-feedback-request"
+          onClick={async () => { if (await act('people/feedback/requests', { body: { reviewer_ids: reviewers, question, subject_id: subject || undefined }, success: `Feedback requested from ${reviewers.length} colleague(s)` })) ask.onClose(); }}><Send size={16} /> Send requests</button></>}>
+        <div className="space-y-4">
+          {isManager && <div><label className="label">About</label><EmployeeSelect value={subject} onChange={setSubject} placeholder="Myself" filter={(e) => e.manager_id === user.id} /></div>}
+          <div><label className="label" htmlFor="rev-pick">Reviewers (up to 10)</label>
+            <div className="flex gap-2"><div className="flex-1"><EmployeeSelect id="rev-pick" value={pick} onChange={setPick} filter={(e) => e.id !== (subject || user.id) && !reviewers.includes(e.id)} /></div>
+              <button type="button" className="btn-secondary" disabled={!pick || reviewers.length >= 10} onClick={() => { setReviewers([...reviewers, pick]); setPick(null); }} data-testid="add-reviewer">Add</button></div>
+            <div className="mt-2 flex flex-wrap gap-2">{reviewers.map((id) => <span key={id} className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-300">{nameOf(id)}<button onClick={() => setReviewers(reviewers.filter((x) => x !== id))} aria-label={`Remove ${nameOf(id)}`}><X size={12} /></button></span>)}</div>
+          </div>
+          <div><label className="label" htmlFor="rev-q">Question (optional)</label><textarea id="rev-q" className="input min-h-20" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="What should I keep doing, and what could I do better?" /></div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+function OneOnOnes() {
+  const { user } = useAuth();
+  const { data = [], isLoading } = useGet('people/one-on-ones');
+  const { data: emps = [] } = useGet('employees');
+  const me = emps.find((e) => e.id === user.id);
+  const [act] = useAction();
+  const add = useDisclosure();
+  const [openId, setOpenId] = useState(null);
+  const [draft, setDraft] = useState({});
+  const open = data.find((o) => o.id === openId);
+  const upcoming = data.filter((o) => o.status === 'scheduled');
+  const past = data.filter((o) => o.status !== 'scheduled');
+  const openMeeting = (o) => { setOpenId(o.id); setDraft({ agenda: o.agenda || '', notes: o.notes || '', action_items: o.action_items || '' }); };
+  const other = (o) => (o.manager_id === user.id ? [o.employee_name, o.employee_color, 'Report'] : [o.manager_name, o.manager_color, 'Manager']);
+  const Row = ({ o }) => { const [n, c, rel] = other(o); return (
+    <button onClick={() => openMeeting(o)} className="flex w-full items-center gap-3 rounded-xl border border-slate-100 p-3 text-left transition hover:border-brand-300 dark:border-slate-800" data-testid="one-on-one">
+      <Avatar name={n} color={c} size="sm" />
+      <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{n} <span className="font-normal muted">· {rel}</span></div><div className="truncate text-xs muted">{o.agenda || 'No agenda yet'}</div></div>
+      <div className="text-right text-xs"><div className="font-semibold">{dateTime(o.scheduled_at)}</div><div className="muted">{o.duration_mins} min</div></div>
+      <Badge status={o.status === 'completed' ? 'done' : o.status === 'cancelled' ? 'rejected' : 'pending'}>{o.status}</Badge>
+    </button>
+  ); };
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-end"><button className="btn-primary" onClick={() => add.onOpen()} data-testid="schedule-1on1"><CalendarClock size={16} /> Schedule 1:1</button></div>
+      {isLoading ? <CardSkeleton lines={4} /> : (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="card card-pad"><h3 className="mb-3 font-semibold">Upcoming ({upcoming.length})</h3><div className="space-y-2">{upcoming.length ? upcoming.slice().reverse().map((o) => <Row key={o.id} o={o} />) : <p className="text-sm muted">Nothing scheduled.</p>}</div></div>
+          <div className="card card-pad"><h3 className="mb-3 font-semibold">Past ({past.length})</h3><div className="space-y-2">{past.length ? past.map((o) => <Row key={o.id} o={o} />) : <p className="text-sm muted">No past meetings.</p>}</div></div>
+        </div>
+      )}
+      <FormModal open={add.open} onClose={add.onClose} title="Schedule a one-on-one" submitLabel="Schedule" initial={{ duration_mins: 30 }}
+        fields={[
+          { name: 'with_id', label: 'With', type: 'employee', required: true, full: true, filter: (e) => e.manager_id === user.id || (me && e.id === me.manager_id) },
+          { name: 'scheduled_at', label: 'When', type: 'datetime-local', required: true },
+          { name: 'duration_mins', label: 'Duration (minutes)', type: 'select', noEmpty: true, options: [15, 30, 45, 60] },
+          { name: 'agenda', label: 'Agenda', type: 'textarea', full: true, placeholder: 'Wins, blockers, growth, feedback…' },
+        ]}
+        onSubmit={(v) => act('people/one-on-ones', { body: v, success: 'One-on-one scheduled' })} />
+      <Modal open={!!open} onClose={() => setOpenId(null)} title={open ? `1:1 · ${other(open)[0]}` : ''} size="lg"
+        footer={open && <>
+          {open.status === 'scheduled' && <button className="btn-ghost text-rose-600" onClick={async () => { if (await act(`people/one-on-ones/${open.id}`, { method: 'PUT', body: { status: 'cancelled' }, success: 'Meeting cancelled' })) setOpenId(null); }}>Cancel meeting</button>}
+          <button className="btn-secondary" onClick={() => act(`people/one-on-ones/${open.id}`, { method: 'PUT', body: draft, success: 'Notes saved' })} data-testid="save-1on1">Save notes</button>
+          {open.status === 'scheduled' && <button className="btn-primary" data-testid="complete-1on1" onClick={async () => { if (await act(`people/one-on-ones/${open.id}`, { method: 'PUT', body: { ...draft, status: 'completed' }, success: 'Marked complete — action items shared' })) setOpenId(null); }}><CheckCircle2 size={16} /> Complete</button>}
+        </>}>
+        {open && (
+          <div className="space-y-4">
+            <div className="text-sm muted">{dateTime(open.scheduled_at)} · {open.duration_mins} min · {open.manager_name} & {open.employee_name}</div>
+            {[['agenda', 'Shared agenda'], ['notes', 'Notes'], ['action_items', 'Action items']].map(([k, l]) => (
+              <div key={k}><label className="label" htmlFor={`oo-${k}`}>{l}</label><textarea id={`oo-${k}`} className="input min-h-20" value={draft[k] || ''} onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} /></div>
+            ))}
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+const PERF_TABS = [{ value: 'goals', label: 'Goals & OKRs' }, { value: 'reviews', label: 'Reviews' }, { value: 'feedback', label: 'Feedback' }, { value: 'one-on-ones', label: 'One-on-ones' }];
+
 export default function Performance() {
-  const [tab, setTab] = useState('goals');
+  const [params, setParams] = useSearchParams();
+  const tab = PERF_TABS.some((t) => t.value === params.get('tab')) ? params.get('tab') : 'goals';
+  const Body = { goals: Goals, reviews: Reviews, feedback: Feedback, 'one-on-ones': OneOnOnes }[tab];
   return (
     <div>
-      <PageHeader icon={Target} title="Performance" subtitle="Goals & OKRs, continuous check-ins and review cycles" />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'goals', label: 'Goals & OKRs' }, { value: 'reviews', label: 'Reviews' }]} />
-      {tab === 'goals' ? <Goals /> : <Reviews />}
+      <PageHeader icon={Target} title="Performance" subtitle="Goals & OKRs, reviews, continuous feedback and one-on-ones" />
+      <Tabs value={tab} onChange={(t) => setParams(t === 'goals' ? {} : { tab: t }, { replace: true })} tabs={PERF_TABS} />
+      <Body />
     </div>
   );
 }

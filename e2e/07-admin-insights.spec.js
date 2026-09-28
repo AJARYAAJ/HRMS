@@ -4,6 +4,7 @@ import { loginAs, nav, expectToast, dialog } from './helpers';
 test.describe.serial('Administration & insights', () => {
   test('organization setup: add, edit and delete a department', async ({ page }) => {
     await loginAs(page, 'admin', '/organization');
+    await page.getByRole('tab', { name: 'Departments' }).click();
     await page.getByTestId('add-departments').click();
     let d = dialog(page, 'Add department');
     await d.getByLabel('Name').fill('Legal');

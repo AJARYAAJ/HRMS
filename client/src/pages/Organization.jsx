@@ -4,11 +4,26 @@ import { PageHeader, Tabs } from '../components/ui';
 import CrudTable from '../components/CrudTable';
 
 export default function Organization() {
-  const [tab, setTab] = useState('departments');
+  const [tab, setTab] = useState('companies');
   return (
     <div>
-      <PageHeader icon={Building2} title="Organization setup" subtitle="Departments, designations, locations and work shifts" />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'departments', label: 'Departments' }, { value: 'designations', label: 'Designations' }, { value: 'locations', label: 'Locations' }, { value: 'shifts', label: 'Shifts' }]} />
+      <PageHeader icon={Building2} title="Organization setup" subtitle="Legal entities, departments, designations, locations and work shifts" />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'companies', label: 'Companies' }, { value: 'departments', label: 'Departments' }, { value: 'designations', label: 'Designations' }, { value: 'locations', label: 'Locations' }, { value: 'shifts', label: 'Shifts' }]} />
+      {tab === 'companies' && (
+        <CrudTable path="companies" label="company" searchKeys={['name', 'legal_name', 'city', 'pan']}
+          columns={[
+            { key: 'name', header: 'Company', width: 'minmax(200px, 1.5fr)', render: (r) => <div className="min-w-0"><div className="truncate font-semibold">{r.name}</div><div className="truncate text-xs muted">{r.legal_name}</div></div> },
+            { key: 'city', header: 'City' }, { key: 'pan', header: 'PAN' }, { key: 'tan', header: 'TAN' }, { key: 'gstin', header: 'GSTIN', width: 'minmax(150px, 1fr)' },
+            { key: 'headcount', header: 'Headcount' },
+          ]}
+          fields={[
+            { name: 'name', label: 'Short name', required: true }, { name: 'legal_name', label: 'Registered legal name' },
+            { name: 'pan', label: 'PAN' }, { name: 'tan', label: 'TAN' }, { name: 'gstin', label: 'GSTIN' },
+            { name: 'pf_code', label: 'PF establishment code' }, { name: 'esi_code', label: 'ESI code' },
+            { name: 'city', label: 'City' }, { name: 'state', label: 'State' },
+            { name: 'address', label: 'Registered address (printed on payslips & letters)', type: 'textarea', full: true },
+          ]} />
+      )}
       {tab === 'departments' && (
         <CrudTable path="departments" label="department" searchKeys={['name', 'code', 'head_name']}
           columns={[{ key: 'name', header: 'Department', render: (r) => <span className="font-semibold">{r.name}</span> }, { key: 'code', header: 'Code' }, { key: 'head_name', header: 'Head' }, { key: 'headcount', header: 'Headcount' }, { key: 'description', header: 'Description', width: 'minmax(200px, 2fr)' }]}
@@ -21,8 +36,12 @@ export default function Organization() {
       )}
       {tab === 'locations' && (
         <CrudTable path="locations" label="location" searchKeys={['name', 'city']}
-          columns={[{ key: 'name', header: 'Location', render: (r) => <span className="font-semibold">{r.name}</span> }, { key: 'city', header: 'City' }, { key: 'state', header: 'State' }, { key: 'headcount', header: 'Headcount' }, { key: 'address', header: 'Address', width: 'minmax(200px, 2fr)' }]}
-          fields={[{ name: 'name', label: 'Name', required: true }, { name: 'city', label: 'City' }, { name: 'state', label: 'State' }, { name: 'address', label: 'Address', type: 'textarea', full: true }]} />
+          columns={[{ key: 'name', header: 'Location', render: (r) => <span className="font-semibold">{r.name}</span> }, { key: 'city', header: 'City' }, { key: 'state', header: 'State' }, { key: 'headcount', header: 'Headcount' },
+            { key: 'geofence', header: 'Geofence', sortable: false, render: (r) => (r.latitude != null ? `${Number(r.latitude).toFixed(4)}, ${Number(r.longitude).toFixed(4)} · ${r.radius_m} m` : <span className="muted">Not set</span>) }]}
+          fields={[{ name: 'name', label: 'Name', required: true }, { name: 'city', label: 'City' }, { name: 'state', label: 'State' },
+            { name: 'latitude', label: 'Latitude', type: 'number', step: 'any', hint: 'For geofenced clock-in' }, { name: 'longitude', label: 'Longitude', type: 'number', step: 'any' },
+            { name: 'radius_m', label: 'Geofence radius (m)', type: 'number', min: 50, max: 5000 },
+            { name: 'address', label: 'Address', type: 'textarea', full: true }]} />
       )}
       {tab === 'shifts' && (
         <CrudTable path="shifts" label="shift" searchKeys={['name']} defaults={{ start_time: '09:30', end_time: '18:30', grace_minutes: 15 }}

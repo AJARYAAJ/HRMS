@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CalendarDays, Plus, XCircle, PartyPopper, Trash2 } from 'lucide-react';
 import { useGet, useAction, useAuth, useDisclosure } from '../lib/hooks';
-import { PageHeader, Tabs, Badge, Avatar, MonthPicker, CardSkeleton, Skeleton, Confirm, cx } from '../components/ui';
+import { PageHeader, Tabs, Badge, Avatar, MonthPicker, CardSkeleton, Skeleton, Confirm, EmptyState, cx } from '../components/ui';
 import DataTable from '../components/DataTable';
 import { FormModal } from '../components/Form';
 import { thisMonth, todayStr, date, shortDate } from '../lib/format';
@@ -127,6 +127,41 @@ function Holidays() {
   );
 }
 
+function OptionalHolidays() {
+  const { data, isLoading } = useGet('workforce/optional-holidays');
+  const [act] = useAction();
+  if (isLoading) return <CardSkeleton lines={4} />;
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl bg-brand-50 p-4 text-sm text-brand-900 dark:bg-brand-500/10 dark:text-brand-200" data-testid="optional-quota">
+        Optional (restricted) holidays: pick up to <b>{data.limit}</b> per year. Chosen: <b>{data.used}</b> of {data.limit}.
+      </div>
+      {data.holidays.length === 0 ? <div className="card"><EmptyState title="No optional holidays this year" /></div> : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {data.holidays.map((h) => {
+            const past = h.date <= todayStr();
+            return (
+              <div key={h.id} className={cx('card flex items-center gap-4 p-4', h.chosen && 'ring-2 ring-emerald-500', past && 'opacity-50')} data-testid="optional-holiday">
+                <div className="flex h-14 w-14 flex-col items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-800">
+                  <span className="text-[10px] font-bold uppercase text-slate-500">{date(h.date, { month: 'short' })}</span>
+                  <span className="text-xl font-bold leading-none">{date(h.date, { day: '2-digit' })}</span>
+                </div>
+                <div className="flex-1"><div className="font-semibold">{h.name}</div><div className="text-xs muted">{date(h.date, { weekday: 'long' })} · {h.takers} opted</div></div>
+                {!past && (
+                  <button className={h.chosen ? 'btn-secondary btn-sm' : 'btn-primary btn-sm'}
+                    onClick={() => act(`workforce/optional-holidays/${h.id}`, { success: h.chosen ? 'Optional holiday removed' : 'Optional holiday added', invalidates: ['attendance', 'leave'] })}>
+                    {h.chosen ? 'Remove' : 'Take it'}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RequestsTable({ all }) {
   const [status, setStatus] = useState('');
   const { data = [], isLoading } = useGet('leave/requests', all ? { status } : { mine: 1, status });
@@ -171,13 +206,14 @@ export default function Leave() {
         actions={<button className="btn-primary" onClick={() => apply.onOpen()} data-testid="apply-leave"><Plus size={16} /> Apply leave</button>} />
       <Balances />
       <Tabs value={tab} onChange={(t) => setParams({ tab: t })} tabs={[
-        { value: 'mine', label: 'My requests' }, { value: 'calendar', label: 'Team calendar' }, { value: 'holidays', label: 'Holidays' },
+        { value: 'mine', label: 'My requests' }, { value: 'calendar', label: 'Team calendar' }, { value: 'holidays', label: 'Holidays' }, { value: 'optional', label: 'Optional holidays' },
         ...(isHR ? [{ value: 'all', label: 'All requests' }] : []),
       ]} />
       {tab === 'mine' && <RequestsTable />}
       {tab === 'all' && isHR && <RequestsTable all />}
       {tab === 'calendar' && <TeamCalendar />}
       {tab === 'holidays' && <Holidays />}
+      {tab === 'optional' && <OptionalHolidays />}
       <FormModal open={apply.open} onClose={() => { apply.onClose(); if (params.get('apply')) setParams({}); }} title="Apply for leave" submitLabel="Submit request"
         initial={{ start_date: todayStr(), end_date: todayStr(), half_day: 0 }}
         fields={[

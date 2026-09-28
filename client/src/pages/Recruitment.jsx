@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Briefcase, Plus, MapPin, Users, Star, Mail, Phone, CalendarPlus, UserCheck, GripVertical, Building, Paperclip } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Briefcase, Plus, MapPin, Users, Star, Mail, Phone, CalendarPlus, UserCheck, GripVertical, Building, Paperclip, FileSignature, ExternalLink } from 'lucide-react';
 import { useGet, useAction, useAuth, useDisclosure, useToast } from '../lib/hooks';
 import { PageHeader, Tabs, Badge, Drawer, CardSkeleton, EmptyState, Skeleton, cx } from '../components/ui';
 import DataTable from '../components/DataTable';
@@ -67,6 +67,7 @@ function Pipeline({ jobId, setJobId }) {
   const add = useDisclosure();
   const schedule = useDisclosure();
   const hire = useDisclosure();
+  const offer = useDisclosure();
   const toast = useToast();
   const [resume, setResume] = useState(null);
   const [openId, setOpenId] = useState(null);
@@ -148,12 +149,23 @@ function Pipeline({ jobId, setJobId }) {
             {open.notes && <div><div className="mb-1 text-sm font-semibold">Notes</div><p className="text-sm muted">{open.notes}</p></div>}
             <div className="text-xs muted">Added {timeAgo(open.created_at)}</div>
             {isHR && open.stage !== 'hired' && open.stage !== 'rejected' && (
-              <button className="btn-success w-full" onClick={() => hire.onOpen(open)} data-testid="hire-candidate"><UserCheck size={16} /> Hire & create employee</button>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button className="btn-secondary" onClick={() => offer.onOpen(open)} data-testid="send-offer"><FileSignature size={16} /> Send offer letter</button>
+                <button className="btn-success" onClick={() => hire.onOpen(open)} data-testid="hire-candidate"><UserCheck size={16} /> Hire & create employee</button>
+              </div>
             )}
           </div>
         )}
       </Drawer>
 
+      <FormModal open={offer.open} onClose={offer.onClose} title={`Offer letter · ${offer.payload?.name || ''}`} submitLabel="Generate & email offer"
+        initial={{ offered_ctc: offer.payload?.expected_ctc || '', joining_date: todayStr() }}
+        fields={[
+          { name: 'offered_ctc', label: 'Offered annual CTC (₹)', type: 'number', required: true, min: 1 },
+          { name: 'joining_date', label: 'Joining date', type: 'date', required: true, min: todayStr() },
+          { name: 'template_id', label: 'Template (default: first offer template)', type: 'lookup', path: 'letter-templates', full: true },
+        ]}
+        onSubmit={(v) => act(`offers/${offer.payload.id}`, { body: { ...v, template_id: v.template_id || undefined }, success: 'Offer letter generated and emailed to the candidate', invalidates: ['candidates', 'attachments'] })} />
       <FormModal open={add.open} onClose={add.onClose} title="Add candidate" initial={{ job_id: jobId, stage: 'applied', source: 'LinkedIn', rating: 3 }}
         fields={[
           { name: 'name', label: 'Full name', required: true }, { name: 'job_id', label: 'Job', type: 'lookup', path: 'jobs', labelKey: 'title', required: true },
@@ -222,7 +234,8 @@ export default function Recruitment() {
   const [jobId, setJobId] = useState(null);
   return (
     <div>
-      <PageHeader icon={Briefcase} title="Recruitment" subtitle="Job openings, candidate pipeline and interview scheduling" />
+      <PageHeader icon={Briefcase} title="Recruitment" subtitle="Job openings, candidate pipeline and interview scheduling"
+        actions={<Link to="/careers" target="_blank" className="btn-secondary" data-testid="careers-link"><ExternalLink size={16} /> Public careers page</Link>} />
       <Tabs value={tab} onChange={setTab} tabs={[{ value: 'pipeline', label: 'Pipeline' }, { value: 'jobs', label: 'Job openings' }, { value: 'interviews', label: 'Interviews' }]} />
       {tab === 'jobs' && <Jobs onPick={(id) => { setJobId(id); setTab('pipeline'); }} />}
       {tab === 'pipeline' && <Pipeline jobId={jobId} setJobId={setJobId} />}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LogIn, LogOut, MapPin, Home, Briefcase } from 'lucide-react';
+import { LogIn, LogOut, MapPin, Home, Briefcase, Navigation } from 'lucide-react';
 import { useGet, useAction } from '../lib/hooks';
 import { Skeleton, Badge, cx } from './ui';
 import { hoursBetween } from '../lib/format';
@@ -17,6 +17,23 @@ export default function ClockWidget({ compact = false }) {
   const { data, isLoading } = useGet('attendance/today');
   const [act, { isLoading: busy }] = useAction();
   const [mode, setMode] = useState('office');
+  const [locating, setLocating] = useState(false);
+
+  // Best-effort location for geofenced attendance; clock-in still works if the user declines.
+  const locate = () => new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve({});
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ latitude: p.coords.latitude, longitude: p.coords.longitude }),
+      () => resolve({}),
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 60000 },
+    );
+  });
+  const clockIn = async () => {
+    setLocating(true);
+    const coords = await locate();
+    setLocating(false);
+    act('attendance/clock-in', { body: { work_mode: mode, ...coords }, success: 'Clocked in successfully' });
+  };
   const now = useNow();
   const rec = data?.record;
   const clockedIn = !!rec?.clock_in && !rec?.clock_out;
@@ -32,7 +49,11 @@ export default function ClockWidget({ compact = false }) {
       <div className="relative">
         <div className="flex items-center justify-between">
           <div className="text-sm font-semibold muted">{now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
-          {rec?.late ? <Badge status="late">Late</Badge> : rec?.clock_in ? <Badge status="present">On time</Badge> : null}
+          <span className="flex gap-1">
+            {rec?.geo_status === 'inside' && <Badge status="inside" data-testid="geo-badge"><Navigation size={10} /> At office</Badge>}
+            {rec?.geo_status === 'outside' && <Badge status="outside"><Navigation size={10} /> Outside geofence</Badge>}
+            {rec?.late ? <Badge status="late">Late</Badge> : rec?.clock_in ? <Badge status="present">On time</Badge> : null}
+          </span>
         </div>
         <div className="mt-2 font-mono text-4xl font-bold tracking-tight text-slate-900 dark:text-white">
           {now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
@@ -63,8 +84,8 @@ export default function ClockWidget({ compact = false }) {
               <LogOut size={16} /> Clock out
             </button>
           ) : (
-            <button className="btn-success w-full py-2.5" disabled={busy} onClick={() => act('attendance/clock-in', { body: { work_mode: mode }, success: 'Clocked in successfully' })} data-testid="clock-in">
-              <LogIn size={16} /> Clock in
+            <button className="btn-success w-full py-2.5" disabled={busy || locating} onClick={clockIn} data-testid="clock-in">
+              <LogIn size={16} /> {locating ? 'Getting location…' : 'Clock in'}
             </button>
           )}
         </div>

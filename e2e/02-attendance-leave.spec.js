@@ -111,7 +111,7 @@ test.describe.serial('Attendance & leave workflows', () => {
     await page.getByRole('link', { name: 'Leave', exact: true }).click();
     await page.getByRole('tab', { name: 'Team calendar' }).click();
     await expect(page.getByText("Who's on leave")).toBeVisible();
-    await page.getByRole('tab', { name: 'Holidays' }).click();
+    await page.getByRole('tab', { name: 'Holidays', exact: true }).click();
     await expect(page.getByText('Gandhi Jayanti')).toBeVisible();
     expect(today()).toMatch(/\d{4}-\d{2}-\d{2}/);
   });

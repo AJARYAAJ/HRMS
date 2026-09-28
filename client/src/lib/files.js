@@ -25,6 +25,9 @@ export function validateFile(file) {
 
 const token = () => store.getState().auth.token;
 
+/** fetch() with the signed-in user's bearer token (for downloads that RTK Query shouldn't cache). */
+export const authFetch = (url, opts = {}) => fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: `Bearer ${token()}` } });
+
 /** Refresh cached lists that show attachment info. */
 export function invalidateFiles(...extra) {
   store.dispatch(api.util.invalidateTags(['attachments', ...extra].map((id) => ({ type: 'R', id }))));

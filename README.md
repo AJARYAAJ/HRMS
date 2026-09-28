@@ -1,7 +1,7 @@
 # PeopleHub HRMS
 
 A full-featured, industry-grade **Human Resource Management System** — a single-page application covering the complete
-hire-to-retire lifecycle, inspired by the best of Keka, Zoho People and We360.ai. Built for Indian workplaces
+hire-to-retire lifecycle, inspired by the best of Keka, Zoho People, We360.ai and BeyondSure. See [docs/FEATURE_COMPARISON.md](docs/FEATURE_COMPARISON.md) for a feature-by-feature mapping. Built for Indian workplaces
 (PF, ESI, professional tax, TDS under the new regime, Indian holiday calendar, INR formatting) and fully role-based.
 
 ![Dashboard](docs/screenshots/dashboard.png)
@@ -15,22 +15,23 @@ hire-to-retire lifecycle, inspired by the best of Keka, Zoho People and We360.ai
 | Area | Features |
 | --- | --- |
 | **Dashboard** | Role-aware KPIs, attendance trend, headcount by department, live clock-in widget, leave balances, who's out, celebrations (birthdays & work anniversaries), new joiners, announcements, kudos, upcoming holidays |
-| **Core HR** | Employee directory (table & card views, filters, CSV export), rich profiles (job, personal, statutory, bank, attendance, leave, assets, documents), interactive org chart with search/zoom, HR edit/reset password/offboard |
-| **Attendance** | Clock in/out with office/remote/field mode, shift-based late marks & half days, monthly calendar, daily log, regularization requests with approval, team presence board |
-| **Leave** | Configurable leave types & quotas, live balances (used/pending/available), weekend & holiday-aware day counting, half days, overlap and balance validation, approvals, cancellation with balance restore, team leave calendar, holiday list |
-| **Payroll** | Monthly payroll runs using attendance + LOP, salary structures & revisions, statutory deductions (PF with ceiling, ESI, PT, TDS new regime FY 25-26 incl. 87A rebate & cess), lock-on-paid, printable payslips with amount in words, investment/tax declarations with HR verification |
+| **Core HR** | Employee directory (table & card views, filters, CSV export), rich profiles, interactive org chart, multiple legal entities (companies), custom profile fields, CSV bulk import with dry-run validation, probation confirmation/extension, HR edit/reset password/offboard |
+| **Attendance** | Clock in/out with office/remote/field mode and geo-fencing (off / flag / enforce), shift-based late marks, half days and overtime, weekly shift roster, WFH / on-duty / comp-off / overtime requests, regularization, monthly calendar, team presence board |
+| **Leave** | Configurable leave types & quotas, live balances, weekend & holiday-aware day counting, half days, overlap and balance validation, approvals, cancellation, optional holidays with a yearly quota, year-end carry forward with cap, team calendar |
+| **Payroll** | Per-company monthly payroll runs using attendance + LOP, configurable salary structure, statutory deductions (PF, ESI, PT, TDS under old or new regime), tax planner comparing regimes, investment declarations, annual tax statement, loans & salary advances with EMI deduction, expense reimbursement through payroll, bank transfer file, printable payslips |
 | **Expenses** | Reimbursement claims with receipt uploads (PDF/photo), receipts viewable by the approver from the inbox, manager approval/rejection with comments |
 | **Timesheets & projects** | Weekly timesheet grid, billable utilisation, project budgets vs logged hours, approvals |
-| **Recruitment (ATS)** | Job openings, drag-and-drop candidate kanban, candidate drawer with resume uploads, interview scheduling with interviewer notification and an email invitation to the candidate, feedback, one-click hire → employee + onboarding checklist |
-| **On/offboarding** | Auto-generated checklists (IT, HR, manager, finance), progress tracking, exit workflow that deactivates the account on completion |
-| **Performance** | Goals/OKRs with weights & progress, self → manager review workflow with star ratings, review cycle launch |
-| **Engage** | Announcements (pinning, company-wide notification), kudos wall with badges, pulse polls |
-| **Productivity** | We360-style activity analytics: productive/neutral/unproductive/idle split, productivity score, daily breakdown, top apps & websites |
+| **Recruitment (ATS)** | Public careers page with online applications, job openings, drag-and-drop candidate kanban, resume uploads, interview scheduling with email invitations, PDF offer letters emailed to candidates, one-click hire → employee + onboarding checklist |
+| **On/offboarding & exit** | Auto-generated checklists, resignations with notice-period LWD and manager → HR approval, exit interviews with analytics, full & final settlement (salary, EL encashment, gratuity, notice and loan recovery) |
+| **Performance** | Goals/OKRs, self → manager reviews, review cycles, continuous feedback with visibility control, 360° feedback requests, one-on-ones with agenda, notes and action items |
+| **Engage** | Announcements, social feed (likes, comments, @mentions), kudos wall, pulse polls, anonymous eNPS with score and breakdown |
+| **Productivity** | We360-style: desktop agent API with device tokens, live active/idle/offline board, per-person hourly timeline, apps & websites, screenshots (opt-in), app classification rules with department overrides, alerts (long idle, unproductive, overwork), auto clock-in |
+| **Work** | Task kanban across projects, travel requests with advances, unified company calendar |
 | **Learning** | Course catalogue, mandatory compliance training, enrolment & progress, completion tracking |
-| **Helpdesk** | HR/IT/payroll tickets with priority, assignment, status workflow, resolution notes and file attachments (screenshots, documents) from both sides |
+| **Helpdesk** | Tickets with priority, assignment, status workflow and attachments; knowledge base with search, helpful votes and article suggestions while raising a ticket |
 | **Assets** | Hardware inventory, allocation, repair tracking, cost |
-| **Documents** | Company policies and personal documents with real file uploads: HR publishes files company-wide or to one employee, employees upload their own KYC documents and certificates, and PDFs and images preview in-app |
-| **Approvals inbox** | Unified queue for leave, regularization, expenses, timesheets and tax proofs, with bulk approve |
+| **Documents** | Company policies and personal documents with real file uploads, policy acknowledgement tracking with reminders, letter templates, PDF letter generation, employee letter requests |
+| **Approvals inbox** | Unified queue for leave, attendance, WFH/on-duty, expenses, travel, loans, timesheets, resignations and tax proofs; configurable manager / manager → HR / HR flows with a full decision history; bulk approve |
 | **Reports** | Headcount trend, attrition, diversity, attendance, leave utilisation, payroll cost, hiring funnel & sources — every dataset exportable to CSV |
 | **Admin** | Departments, designations, locations, shifts, leave policy, holidays, company settings, full audit log |
 | **Email** | Transactional email over SMTP: every in-app notification is also emailed (per-user opt-out), plus welcome emails with sign-in details, interview invitations, a forgot-password flow with single-use reset links, and password-change alerts. Emails go through a persistent outbox with background delivery and retries; admins get delivery status, a rendered preview, a test send and an SMTP connection check in Settings → Email |
@@ -41,7 +42,7 @@ hire-to-retire lifecycle, inspired by the best of Keka, Zoho People and We360.ai
 ```
 client/  React 19 SPA · Redux Toolkit + RTK Query · React Router · Tailwind CSS v4 · Recharts · TanStack Virtual
 server/  Node.js + Express 5 · SQLite (built-in node:sqlite, zero native deps) · JWT auth · bcrypt · Multer uploads · Nodemailer SMTP
-e2e/     Playwright end-to-end tests (56 tests across all modules and roles, with a real SMTP capture server)
+e2e/     Playwright end-to-end tests (76 tests across all modules and roles, with a real SMTP capture server)
 ```
 
 **SPA & performance**
@@ -50,6 +51,7 @@ e2e/     Playwright end-to-end tests (56 tests across all modules and roles, wit
 - **Code splitting**: every page is a lazy chunk, and vendor code is split into long-cacheable `react`, `state`, `charts` and `icons` chunks. Hovering a sidebar item prefetches that page's chunk.
 - **Skeleton loaders** for every page, card and table instead of spinners.
 - **RTK Query cache**: deduplicated requests, a shared cache across pages, and tag-based invalidation. Writes refresh every dependent module automatically, e.g. approving leave refreshes attendance, balances, approvals and the dashboard.
+- **Installable PWA**: web manifest and a service worker that caches the app shell and hashed assets (API calls are never cached).
 - **Large datasets**: the `DataTable` is virtualised and renders only visible rows, so 5,000+ records scroll smoothly (covered by an E2E test). It also has debounced search, multi-type sorting and CSV export.
 
 ## Getting started
@@ -69,6 +71,12 @@ npm run dev
 ```
 
 Reset demo data at any time: `npm run seed`.
+
+Simulate desktop activity agents (registers devices and streams heartbeats and screenshots):
+
+```bash
+npm run agent:simulate -- --people 5 --minutes 60 --live
+```
 
 ### Demo accounts
 
@@ -114,7 +122,7 @@ npm run test:api     # backend: payroll/tax maths, leave rules, RBAC, audit, upl
 npm run test:e2e     # builds the SPA and runs the Playwright suite in Chromium
 ```
 
-The E2E suite drives the real app in a browser and covers authentication, SPA behaviour, skeletons, RBAC, the command palette, dark mode, clock-in/out, regularization, leave apply/approve/reject/cancel with balance checks, employee CRUD, onboarding, org chart, virtualised 5,000-row tables, payroll run → paid → payslip, salary revision, tax declarations, recruitment pipeline (including drag-and-drop), hiring, goals, reviews, expenses, bulk approvals, timesheets, helpdesk, announcements, kudos, polls, learning, documents, notifications, organization setup, settings, offboarding, reports, productivity, audit log, the mobile layout, file uploads (documents, receipts, ticket attachments, resumes, previews, downloads, type validation) and email (welcome, approval and reset emails delivered to a real SMTP server, the email log and preview, test sends, forgot-password via the emailed link, opting out).
+The E2E suite drives the real app in a browser and covers authentication, SPA behaviour, skeletons, RBAC, the command palette, dark mode, clock-in/out, regularization, leave apply/approve/reject/cancel with balance checks, employee CRUD, onboarding, org chart, virtualised 5,000-row tables, payroll run → paid → payslip, salary revision, tax declarations, recruitment pipeline (including drag-and-drop), hiring, goals, reviews, expenses, bulk approvals, timesheets, helpdesk, announcements, kudos, polls, learning, documents, notifications, organization setup, settings, offboarding, reports, productivity, audit log, the mobile layout, file uploads (documents, receipts, ticket attachments, resumes, previews, downloads, type validation) email (welcome, approval and reset emails delivered to a real SMTP server, the email log and preview, test sends, forgot-password via the emailed link, opting out), and the parity features: two-level approvals, WFH requests, optional holidays, shift roster, tax planner and statement, bank file, letter PDFs emailed as attachments, policy acknowledgement, CSV import, knowledge base, feedback and 1:1s, social feed, eNPS, public careers applications and offer letters, tasks, travel, calendar, full & final settlement, resignation → exit interview, and the activity agent (device token → live board → timeline → revocation).
 
 ## Screenshots
 

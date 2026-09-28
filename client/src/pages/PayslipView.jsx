@@ -24,7 +24,7 @@ export default function PayslipView() {
   if (error) return <div className="card"><EmptyState title="Payslip not available" message={error?.data?.error} /></div>;
   const c = s.company || {};
   const earnings = [['Basic salary', s.basic], ['House rent allowance', s.hra], ['Special allowance', s.special]];
-  const deductions = [['Provident fund', s.pf], ['ESI', s.esi], ['Professional tax', s.pt], ['Income tax (TDS)', s.tds]];
+  const deductions = [['Provident fund', s.pf], ['ESI', s.esi], ['Professional tax', s.pt], [`Income tax (TDS · ${s.tax_regime === 'old' ? 'old' : 'new'} regime)`, s.tds], ...(s.loan_deduction ? [['Loan / advance EMI', s.loan_deduction]] : [])];
   return (
     <div className="mx-auto max-w-4xl space-y-4">
       <div className="no-print flex items-center justify-between">
@@ -37,6 +37,7 @@ export default function PayslipView() {
             <div className="text-xl font-bold">{c.company_name}</div>
             <div className="text-sm text-white/80">{c.company_address}</div>
           </div>
+          <div className="hidden text-xs text-white/70 sm:block">{c.pf_code ? `PF ${c.pf_code}` : ''}{c.esi_code ? ` · ESI ${c.esi_code}` : ''}{c.company_tan ? ` · TAN ${c.company_tan}` : ''}</div>
           <div className="text-left sm:text-right">
             <div className="text-xs uppercase tracking-wider text-white/70">Payslip for</div>
             <div className="text-lg font-bold">{monthLabel(s.month)}</div>
@@ -44,7 +45,7 @@ export default function PayslipView() {
         </div>
         <div className="grid gap-x-8 gap-y-3 border-b border-slate-100 p-6 text-sm dark:border-slate-800 sm:grid-cols-3">
           {[['Employee', s.employee_name], ['Employee ID', s.emp_code], ['Designation', s.designation], ['Department', s.department], ['Date of joining', date(s.date_of_joining)],
-            ['PAN', s.pan], ['UAN', s.uan], ['Bank', `${s.bank_name || '—'} ${s.bank_account ? '•••• ' + String(s.bank_account).slice(-4) : ''}`],
+            ['PAN', s.pan], ['UAN', s.uan], ['Legal entity', s.company_name], ['Bank', `${s.bank_name || '—'} ${s.bank_account ? '•••• ' + String(s.bank_account).slice(-4) : ''}`],
             ['Paid days', `${s.paid_days} / ${s.working_days}${s.lop_days ? ` (LOP ${s.lop_days})` : ''}`]].map(([l, v]) => (
             <div key={l}><div className="text-xs text-slate-400">{l}</div><div className="font-medium">{v || '—'}</div></div>
           ))}
@@ -58,6 +59,13 @@ export default function PayslipView() {
             </div>
           ))}
         </div>
+        {s.reimbursement > 0 && (
+          <div className="mx-6 mb-4 rounded-xl border border-slate-100 p-4 text-sm dark:border-slate-800" data-testid="reimbursements">
+            <div className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">Reimbursements (non-taxable)</div>
+            {(s.reimbursed || []).map((r) => <div key={r.id} className="flex justify-between py-1"><span>{r.category} · {date(r.date)}</span><span className="font-medium">{money(r.amount, true)}</span></div>)}
+            <div className="mt-1 flex justify-between border-t border-slate-100 pt-2 font-bold dark:border-slate-800"><span>Total reimbursed</span><span>{money(s.reimbursement, true)}</span></div>
+          </div>
+        )}
         <div className="m-6 mt-0 rounded-2xl bg-emerald-50 p-5 dark:bg-emerald-500/10">
           <div className="flex items-center justify-between">
             <span className="font-semibold text-emerald-900 dark:text-emerald-200">Net pay</span>

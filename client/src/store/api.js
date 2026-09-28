@@ -38,6 +38,21 @@ const RELATED = {
   assets: ['employees'],
   reviews: [],
   goals: ['dashboard'],
+  resignations: ['exit', 'approvals', 'employees', 'onboarding', 'dashboard'],
+  exit: ['resignations', 'employees', 'loans'],
+  loans: ['approvals', 'payroll'],
+  'attendance-requests': ['attendance', 'approvals', 'leave', 'dashboard'],
+  travel: ['approvals', 'work'],
+  workforce: ['attendance', 'leave'],
+  hr: ['documents', 'letter-requests', 'employees', 'notifications'],
+  'letter-requests': ['documents'],
+  'letter-templates': ['documents'],
+  'custom-fields': ['employees', 'auth'],
+  companies: ['employees', 'payroll'],
+  offers: ['candidates'],
+  people: ['dashboard'],
+  activity: ['productivity'],
+  settings: ['approvals'],
 };
 
 export const api = createApi({

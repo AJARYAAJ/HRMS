@@ -8,19 +8,24 @@ test.describe.serial('Payroll', () => {
     await loginAs(page, 'hr', '/payroll');
     await page.getByTestId('run-payroll').click();
     await page.getByTestId('confirm-run').click();
-    await expectToast(page, `Payroll processed for ${monthLabel()}`);
-    const row = page.getByTestId('table-row').filter({ hasText: monthLabel() });
-    await expect(row).toContainText('Processed');
-    await row.getByTestId('mark-paid').click();
-    await page.getByRole('dialog', { name: 'Mark payroll as paid?' }).getByRole('button', { name: 'Mark paid' }).click();
-    await expectToast(page, 'Payroll marked as paid');
-    await expect(row).toContainText('Paid');
+    // One run per legal entity (BeyondSure-style multi-company payroll).
+    await expectToast(page, `Payroll processed for ${monthLabel()} · 2 companies`);
+    const rows = page.getByTestId('table-row').filter({ hasText: monthLabel() });
+    await expect(rows).toHaveCount(2);
+    for (const company of ['Nimbus Technologies', 'Nimbus Digital']) {
+      const row = rows.filter({ hasText: company });
+      await expect(row).toContainText('Processed');
+      await row.getByTestId('mark-paid').click();
+      await page.getByRole('dialog', { name: 'Mark payroll as paid?' }).getByRole('button', { name: 'Mark paid' }).click();
+      await expectToast(page, 'Payroll marked as paid');
+      await expect(row).toContainText('Paid');
+    }
   });
 
   test('HR inspects payslips for a run and revises a salary', async ({ page }) => {
     await loginAs(page, 'hr', '/payroll');
-    await page.getByTestId('table-row').filter({ hasText: monthLabel() }).click();
-    const drawer = page.getByRole('dialog', { name: `Payslips · ${monthLabel()}` });
+    await page.getByTestId('table-row').filter({ hasText: monthLabel() }).filter({ hasText: 'Nimbus Technologies' }).click();
+    const drawer = page.getByRole('dialog', { name: `Payslips · ${monthLabel()} · Nimbus Technologies` });
     await expect(drawer.getByTestId('table-row').first()).toBeVisible();
     await page.keyboard.press('Escape');
     await page.getByRole('tab', { name: 'Salary structures' }).click();

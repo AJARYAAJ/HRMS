@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS employees (
   bank_account TEXT,
   ifsc TEXT,
   annual_ctc REAL DEFAULT 0,
+  email_notifications INTEGER NOT NULL DEFAULT 1,
   avatar_color TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -406,6 +407,47 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity TEXT NOT NULL,
+  entity_id INTEGER NOT NULL,
+  stored_name TEXT NOT NULL UNIQUE,
+  original_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  uploaded_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS email_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  to_email TEXT NOT NULL,
+  to_name TEXT,
+  employee_id INTEGER,
+  subject TEXT NOT NULL,
+  html TEXT NOT NULL,
+  text TEXT,
+  template TEXT,
+  status TEXT NOT NULL DEFAULT 'queued',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  message_id TEXT,
+  next_attempt_at TEXT DEFAULT (datetime('now')),
+  created_at TEXT DEFAULT (datetime('now')),
+  sent_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS password_resets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_attach_entity ON attachments(entity, entity_id);
+CREATE INDEX IF NOT EXISTS idx_outbox_status ON email_outbox(status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS idx_att_emp_date ON attendance(employee_id, date);
 CREATE INDEX IF NOT EXISTS idx_leave_emp ON leave_requests(employee_id);
 CREATE INDEX IF NOT EXISTS idx_notif_emp ON notifications(employee_id, read);

@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import { all, get, insert, update, run, tx } from '../db.js';
 import { signToken, requireRole, isHR, reportIds } from '../auth.js';
 import { audit, notify, ensureLeaveBalances, httpError, today } from '../utils.js';
+import { emailEmployee, appUrl } from '../mailer.js';
 
 export const authRouter = Router();
 export const employeesRouter = Router();
@@ -57,10 +59,52 @@ authRouter.post('/change-password', (req, res) => {
   res.json({ ok: true });
 });
 
+const RESET_TTL_MINUTES = 30;
+const hashToken = (t) => crypto.createHash('sha256').update(t).digest('hex');
+
+/** Always answers the same way so the endpoint can't be used to discover which emails have accounts. */
+export function forgotPasswordHandler(req, res) {
+  const email = String(req.body?.email || '').trim();
+  if (!email) throw httpError(400, 'Email is required');
+  const user = get("SELECT id, first_name FROM employees WHERE lower(email) = lower(?) AND status != 'exited'", email);
+  if (user) {
+    const recent = get("SELECT COUNT(*) AS n FROM password_resets WHERE employee_id = ? AND created_at > datetime('now', '-15 minutes')", user.id).n;
+    if (recent < 3) {
+      const token = crypto.randomBytes(32).toString('base64url');
+      insert('password_resets', { employee_id: user.id, token_hash: hashToken(token), expires_at: new Date(Date.now() + RESET_TTL_MINUTES * 60000).toISOString() });
+      emailEmployee(user.id, {
+        force: true, template: 'password_reset', subject: 'Reset your PeopleHub password', heading: 'Reset your password',
+        paragraphs: ['We received a request to reset your password. Click the button below to choose a new one.'],
+        cta: { url: `${appUrl()}/reset-password?token=${token}`, label: 'Reset password' },
+        footnote: `This link expires in ${RESET_TTL_MINUTES} minutes and can be used once. If you didn't request it, you can ignore this email.`,
+      });
+      audit(user.id, 'request_password_reset', 'employees', user.id);
+    }
+  }
+  res.json({ ok: true, message: 'If an account exists for that email, a reset link is on its way.' });
+}
+
+export function resetPasswordHandler(req, res) {
+  const { token, password } = req.body || {};
+  if (!token) throw httpError(400, 'Reset token is missing');
+  if (!password || password.length < 8) throw httpError(400, 'Password must be at least 8 characters');
+  const row = get('SELECT * FROM password_resets WHERE token_hash = ?', hashToken(String(token)));
+  if (!row || row.used_at || new Date(row.expires_at) < new Date()) throw httpError(400, 'This reset link is invalid or has expired');
+  update('employees', row.employee_id, { password_hash: bcrypt.hashSync(password, 10) });
+  run("UPDATE password_resets SET used_at = datetime('now') WHERE employee_id = ? AND used_at IS NULL", row.employee_id);
+  audit(row.employee_id, 'reset_password_via_email', 'employees', row.employee_id);
+  emailEmployee(row.employee_id, {
+    force: true, template: 'password_changed', subject: 'Your PeopleHub password was changed', heading: 'Password changed',
+    paragraphs: ['Your password was just changed using a reset link. If this wasn\'t you, contact HR immediately.'],
+  });
+  res.json({ ok: true });
+}
+
 // Self-service profile fields an employee may edit without HR.
 authRouter.put('/profile', (req, res) => {
-  const allowed = ['phone', 'address', 'emergency_contact', 'marital_status', 'blood_group', 'bank_name', 'bank_account', 'ifsc'];
+  const allowed = ['phone', 'address', 'emergency_contact', 'marital_status', 'blood_group', 'bank_name', 'bank_account', 'ifsc', 'email_notifications'];
   const data = Object.fromEntries(allowed.filter((k) => k in req.body).map((k) => [k, req.body[k]]));
+  if ('email_notifications' in data) data.email_notifications = data.email_notifications ? 1 : 0;
   update('employees', req.user.id, data);
   audit(req.user.id, 'update_profile', 'employees', req.user.id);
   res.json(sanitize(get(`${EMP_SELECT} WHERE t.id = ?`, req.user.id), req.user));
@@ -160,7 +204,14 @@ export function createEmployee(body, actorId) {
     ensureLeaveBalances(id);
     createTasks(id, 'onboarding', data.date_of_joining);
     if (data.manager_id) notify(data.manager_id, 'New team member', `${data.first_name} ${data.last_name} joins your team on ${data.date_of_joining}`, `/employees/${id}`);
-    notify(id, 'Welcome to PeopleHub!', 'Complete your profile and onboarding checklist.', '/onboarding');
+    notify(id, 'Welcome to PeopleHub!', 'Complete your profile and onboarding checklist.', '/onboarding', { email: false });
+    emailEmployee(id, {
+      force: true, template: 'welcome', subject: `Welcome to the team, ${data.first_name}!`, heading: 'Your PeopleHub account is ready',
+      paragraphs: ['We are excited to have you on board. Sign in to complete your profile, onboarding checklist and bank details.'],
+      details: [['Employee ID', data.emp_code], ['Joining date', data.date_of_joining], ['Sign-in email', data.email], ['Temporary password', body.password || 'Welcome@123']],
+      cta: { url: `${appUrl()}/login`, label: 'Sign in to PeopleHub' },
+      footnote: 'Please change your password after your first sign-in (Account settings → Change password).',
+    });
     audit(actorId, 'create', 'employees', id);
     return id;
   });
@@ -201,6 +252,12 @@ employeesRouter.post('/:id/reset-password', requireRole('admin', 'hr'), (req, re
   const password = req.body.password || 'Welcome@123';
   update('employees', Number(req.params.id), { password_hash: bcrypt.hashSync(password, 10) });
   audit(req.user.id, 'reset_password', 'employees', Number(req.params.id));
+  emailEmployee(Number(req.params.id), {
+    force: true, template: 'password_reset_by_hr', subject: 'Your PeopleHub password was reset', heading: 'Your password was reset by HR',
+    paragraphs: [`${req.user.first_name} ${req.user.last_name} reset your password. Use the temporary password below and change it after signing in.`],
+    details: [['Temporary password', password]],
+    cta: { url: `${appUrl()}/login`, label: 'Sign in' },
+  });
   res.json({ ok: true });
 });
 

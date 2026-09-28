@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { authenticate } from './auth.js';
-import { authRouter, employeesRouter, loginHandler } from './routes/employees.js';
+import { authRouter, employeesRouter, loginHandler, forgotPasswordHandler, resetPasswordHandler } from './routes/employees.js';
+import { attachmentsRouter } from './routes/attachments.js';
+import { emailsRouter } from './routes/emails.js';
 import {
   attendanceRouter, leaveRouter, regularizationsRouter, shiftsRouter, holidaysRouter,
 } from './routes/attendance.js';
@@ -22,6 +24,8 @@ export function createApp() {
   const api = express.Router();
   api.get('/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
   api.post('/auth/login', loginHandler);
+  api.post('/auth/forgot-password', forgotPasswordHandler);
+  api.post('/auth/reset-password', resetPasswordHandler);
   api.use(authenticate);
   api.use('/auth', authRouter);
   api.use('/employees', employeesRouter);
@@ -60,6 +64,8 @@ export function createApp() {
   api.use('/productivity', productivityRouter);
   api.use('/search', searchRouter);
   api.use('/approvals', approvalsRouter);
+  api.use('/attachments', attachmentsRouter);
+  api.use('/emails', emailsRouter);
   api.use((req, res) => res.status(404).json({ error: 'Not found' }));
   app.use('/api', api);
 

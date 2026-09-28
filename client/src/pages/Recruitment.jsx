@@ -1,10 +1,12 @@
 import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Briefcase, Plus, MapPin, Users, Star, Mail, Phone, CalendarPlus, UserCheck, GripVertical, Building } from 'lucide-react';
-import { useGet, useAction, useAuth, useDisclosure } from '../lib/hooks';
+import { Briefcase, Plus, MapPin, Users, Star, Mail, Phone, CalendarPlus, UserCheck, GripVertical, Building, Paperclip } from 'lucide-react';
+import { useGet, useAction, useAuth, useDisclosure, useToast } from '../lib/hooks';
 import { PageHeader, Tabs, Badge, Drawer, CardSkeleton, EmptyState, Skeleton, cx } from '../components/ui';
 import DataTable from '../components/DataTable';
 import { FormModal } from '../components/Form';
+import { FileDrop, Attachments } from '../components/Files';
+import { uploadAttachment, invalidateFiles } from '../lib/files';
 import { money, dateTime, timeAgo, todayStr } from '../lib/format';
 
 const STAGES = [
@@ -65,6 +67,8 @@ function Pipeline({ jobId, setJobId }) {
   const add = useDisclosure();
   const schedule = useDisclosure();
   const hire = useDisclosure();
+  const toast = useToast();
+  const [resume, setResume] = useState(null);
   const [openId, setOpenId] = useState(null);
   const [dragOver, setDragOver] = useState(null);
   // Track the dragged card ourselves: dataTransfer payloads are unreliable across browsers.
@@ -80,7 +84,7 @@ function Pipeline({ jobId, setJobId }) {
         <select className="input !w-auto" value={jobId || ''} onChange={(e) => setJobId(e.target.value ? Number(e.target.value) : null)} aria-label="Job filter">
           <option value="">All jobs</option>{jobs.map((j) => <option key={j.id} value={j.id}>{j.title}</option>)}
         </select>
-        <button className="btn-primary" onClick={() => add.onOpen()} data-testid="add-candidate"><Plus size={16} /> Add candidate</button>
+        <button className="btn-primary" onClick={() => { setResume(null); add.onOpen(); }} data-testid="add-candidate"><Plus size={16} /> Add candidate</button>
       </div>
       <div className="flex gap-4 overflow-x-auto pb-4" data-testid="kanban">
         {STAGES.map(([stage, label, dot]) => (
@@ -100,7 +104,7 @@ function Pipeline({ jobId, setJobId }) {
                       <div className="truncate text-sm font-semibold">{c.name}</div>
                       <div className="truncate text-xs muted">{c.job_title}</div>
                       <div className="mt-2 flex items-center justify-between text-[11px] muted">
-                        <span>{c.experience_years}y · {c.current_company}</span>
+                        <span className="flex items-center gap-1">{c.experience_years}y · {c.current_company}{c.attachment_count ? <Paperclip size={10} className="text-brand-500" aria-label="Resume attached" /> : null}</span>
                         <span className="flex">{Array.from({ length: c.rating || 0 }).map((_, i) => <Star key={i} size={10} className="fill-amber-400 text-amber-400" />)}</span>
                       </div>
                     </div>
@@ -140,6 +144,7 @@ function Pipeline({ jobId, setJobId }) {
                 </div>
               ))}
             </div>
+            <Attachments entity="candidates" entityId={open.id} title="Resume & documents" related={['candidates']} />
             {open.notes && <div><div className="mb-1 text-sm font-semibold">Notes</div><p className="text-sm muted">{open.notes}</p></div>}
             <div className="text-xs muted">Added {timeAgo(open.created_at)}</div>
             {isHR && open.stage !== 'hired' && open.stage !== 'rejected' && (
@@ -158,7 +163,17 @@ function Pipeline({ jobId, setJobId }) {
           { name: 'expected_ctc', label: 'Expected CTC (₹)', type: 'number', min: 0 }, { name: 'rating', label: 'Rating (1-5)', type: 'number', min: 1, max: 5 },
           { name: 'notes', label: 'Notes', type: 'textarea', full: true },
         ]}
-        onSubmit={(v) => act('candidates', { body: v, success: 'Candidate added' })} />
+        onSubmit={async (v) => {
+          const created = await act('candidates', { body: v });
+          if (!created) return null;
+          if (resume) {
+            try { await uploadAttachment('candidates', created.id, resume); invalidateFiles('candidates'); } catch (e) { toast(`Candidate added, but the resume failed to upload: ${e.message}`, 'error'); return created; }
+          }
+          toast(resume ? 'Candidate added with resume' : 'Candidate added');
+          return created;
+        }}>
+        <FileDrop file={resume} onChange={setResume} label="Resume (optional)" hint="PDF or Word · up to 10 MB" testId="resume-drop" />
+      </FormModal>
       <FormModal open={schedule.open} onClose={schedule.onClose} title="Schedule interview" initial={{ round: 'Technical Round 1', mode: 'Video', scheduled_at: `${todayStr()}T15:00` }}
         fields={[
           { name: 'round', label: 'Round', required: true }, { name: 'mode', label: 'Mode', type: 'select', noEmpty: true, options: ['Video', 'In-person', 'Phone'] },

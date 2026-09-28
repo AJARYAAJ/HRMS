@@ -4,6 +4,7 @@ import { useGet, useAction, useAuth } from '../lib/hooks';
 import { PageHeader, Tabs, CardSkeleton, Badge } from '../components/ui';
 import { FormFields } from '../components/Form';
 import CrudTable from '../components/CrudTable';
+import EmailSettings from './EmailSettings';
 
 const COMPANY_FIELDS = [
   { name: 'company_name', label: 'Legal company name', required: true, full: true }, { name: 'company_short', label: 'Short name' },
@@ -39,9 +40,10 @@ export default function Settings() {
   const [tab, setTab] = useState('company');
   return (
     <div>
-      <PageHeader icon={SettingsIcon} title="Settings" subtitle="Company profile, leave policy and holiday calendar" />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'company', label: 'Company' }, { value: 'leave', label: 'Leave policy' }, { value: 'holidays', label: 'Holidays' }]} />
+      <PageHeader icon={SettingsIcon} title="Settings" subtitle="Company profile, leave policy, holiday calendar and email delivery" />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'company', label: 'Company' }, { value: 'leave', label: 'Leave policy' }, { value: 'holidays', label: 'Holidays' }, { value: 'email', label: 'Email' }]} />
       {tab === 'company' && <Company />}
+      {tab === 'email' && <EmailSettings />}
       {tab === 'leave' && (
         <CrudTable path="leave/types" label="leave type" searchKeys={['name', 'code']} defaults={{ paid: 1, carry_forward: 0, color: '#6366f1' }}
           columns={[

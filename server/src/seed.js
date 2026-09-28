@@ -3,6 +3,36 @@ import { fileURLToPath } from 'node:url';
 import { db, migrate, resetDb, insert, run, get, all, tx } from './db.js';
 import { ymd, pad, isWeekend, parseDate, computePayslip, monthRange, workingDaysBetween, ensureLeaveBalances } from './utils.js';
 import { createTasks } from './routes/employees.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { UPLOAD_DIR } from './uploads.js';
+
+/** Minimal valid single-page PDF so seeded policies have real, previewable files. */
+function makePdf(title, lines) {
+  const esc = (t) => t.replace(/[\\()]/g, (c) => `\\${c}`);
+  const text = [`BT /F1 20 Tf 60 780 Td (${esc(title)}) Tj ET`, ...lines.map((l, i) => `BT /F1 11 Tf 60 ${740 - i * 18} Td (${esc(l)}) Tj ET`)].join('\n');
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${Buffer.byteLength(text)} >>\nstream\n${text}\nendstream`,
+  ];
+  let out = '%PDF-1.4\n';
+  const offsets = [];
+  objs.forEach((o, i) => { offsets.push(Buffer.byteLength(out)); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = Buffer.byteLength(out);
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out);
+}
+
+function seedFile(entity, entityId, name, buffer, uploadedBy) {
+  const stored = `${crypto.randomUUID()}${path.extname(name)}`;
+  fs.writeFileSync(path.join(UPLOAD_DIR, stored), buffer);
+  insert('attachments', { entity, entity_id: entityId, stored_name: stored, original_name: name, mime_type: 'application/pdf', size: buffer.length, uploaded_by: uploadedBy });
+}
 
 // Deterministic PRNG so every fresh install gets the same demo data.
 let s = 42;
@@ -66,8 +96,10 @@ const APPS = {
 
 export function seed({ reset = true } = {}) {
   s = 42;
-  if (reset) resetDb();
-  else migrate();
+  if (reset) {
+    resetDb();
+    for (const f of fs.readdirSync(UPLOAD_DIR)) fs.rmSync(path.join(UPLOAD_DIR, f), { force: true });
+  } else migrate();
   const hash = bcrypt.hashSync(DEMO_PASSWORD, 10);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -409,7 +441,10 @@ export function seed({ reset = true } = {}) {
       ['POSH Policy', 'Compliance', 'Zero tolerance for harassment. Internal Committee contact: ic@nimbus.example.'],
       ['Holiday List 2026', 'Calendar', 'Public and optional holidays for the calendar year 2026.'],
     ];
-    for (const [title, category, content] of policies) insert('documents', { title, category, content, employee_id: null });
+    for (const [title, category, content] of policies) {
+      const docId = insert('documents', { title, category, content, employee_id: null });
+      seedFile('documents', docId, `${title.replace(/[^a-z0-9]+/gi, '-')}.pdf`, makePdf(title, [settings.company_name, '', ...content.match(/.{1,85}(\s|$)/g).map((l) => l.trim())]), hr);
+    }
     insert('documents', { title: 'Offer Letter', category: 'Personal', content: 'Offer letter for Software Engineer role.', employee_id: emp });
     insert('documents', { title: 'Appraisal Letter FY25', category: 'Personal', content: 'Revised compensation effective April.', employee_id: emp });
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useDispatch } from 'react-redux';
-import { UserCircle, KeyRound, Save, Moon, Sun } from 'lucide-react';
+import { UserCircle, KeyRound, Save, Moon, Sun, Mail } from 'lucide-react';
 import { useGet, useAction } from '../lib/hooks';
 import { PageHeader, CardSkeleton } from '../components/ui';
 import { FormFields } from '../components/Form';
@@ -19,6 +19,7 @@ export default function Profile() {
   const [values, setValues] = useState({});
   const [pw, setPw] = useState({ current_password: '', new_password: '', confirm: '' });
   const [pwError, setPwError] = useState('');
+  const [emailPref, setEmailPref] = useState(null);
   const [act] = useAction();
   const dispatch = useDispatch();
   useEffect(() => { if (data) setValues(data); }, [data]);
@@ -55,6 +56,26 @@ export default function Profile() {
         {pwError && <p className="text-sm text-rose-600">{pwError}</p>}
         <div className="flex justify-end"><button className="btn-primary">Update password</button></div>
       </form>
+      {data && (
+        <div className="card card-pad flex items-center justify-between gap-4">
+          <div>
+            <h3 className="flex items-center gap-2 font-semibold"><Mail size={16} className="text-brand-500" /> Email notifications</h3>
+            <p className="text-sm muted">Get an email for approvals, payslips, kudos and other updates. Security emails (password resets) are always sent.</p>
+          </div>
+          <label className="relative inline-flex cursor-pointer items-center">
+            <input type="checkbox" className="peer sr-only" aria-label="Email notifications" data-testid="email-pref"
+              checked={emailPref ?? !!data.email_notifications}
+              onChange={async (e) => {
+                const on = e.target.checked;
+                setEmailPref(on); // optimistic: flip immediately, roll back if the save fails
+                const ok = await act('auth/profile', { method: 'PUT', body: { email_notifications: on }, success: on ? 'Email notifications on' : 'Email notifications off', invalidates: ['auth'] });
+                if (!ok) setEmailPref(!on);
+              }} />
+            <span className="h-6 w-11 rounded-full bg-slate-200 transition peer-checked:bg-brand-600 dark:bg-slate-700" />
+            <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+          </label>
+        </div>
+      )}
       <div className="card card-pad flex items-center justify-between">
         <div><h3 className="font-semibold">Appearance</h3><p className="text-sm muted">Switch between light and dark theme.</p></div>
         <button className="btn-secondary" onClick={() => dispatch(toggleTheme())}><Moon size={16} className="dark:hidden" /><Sun size={16} className="hidden dark:block" /> Toggle theme</button>

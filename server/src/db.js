@@ -12,6 +12,12 @@ db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
 
 export function migrate() {
   db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
+  // Columns added after the first release; CREATE TABLE IF NOT EXISTS won't add them to existing databases.
+  const addColumn = (table, column, ddl) => {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+    if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  };
+  addColumn('employees', 'email_notifications', 'INTEGER NOT NULL DEFAULT 1');
 }
 
 export function resetDb() {

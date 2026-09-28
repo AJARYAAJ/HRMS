@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 process.env.DB_PATH = path.join(os.tmpdir(), `peoplehub-api-${process.pid}.db`);
+process.env.UPLOAD_DIR = path.join(os.tmpdir(), `peoplehub-api-uploads-${process.pid}`);
 const { seed } = await import('../src/seed.js');
 const { createApp } = await import('../src/app.js');
 const { annualTaxNewRegime, computePayslip, workingDaysBetween } = await import('../src/utils.js');

@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { LifeBuoy, Plus, MessageSquare } from 'lucide-react';
-import { useGet, useAction, useAuth, useDisclosure } from '../lib/hooks';
+import { LifeBuoy, Plus, MessageSquare, Paperclip } from 'lucide-react';
+import { useGet, useAction, useAuth, useDisclosure, useToast } from '../lib/hooks';
 import { PageHeader, Badge, Avatar, Drawer, Tabs } from '../components/ui';
 import DataTable from '../components/DataTable';
 import { FormModal, EmployeeSelect } from '../components/Form';
+import { FileDrop, Attachments } from '../components/Files';
+import { uploadAttachment, invalidateFiles } from '../lib/files';
 import { timeAgo, dateTime } from '../lib/format';
 
 export default function Helpdesk() {
-  const { isHR } = useAuth();
+  const { isHR, user } = useAuth();
+  const toast = useToast();
+  const [file, setFile] = useState(null);
   const [params, setParams] = useSearchParams();
   const [status, setStatus] = useState('');
   const [tab, setTab] = useState(isHR ? 'all' : 'mine');
@@ -23,7 +27,7 @@ export default function Helpdesk() {
   return (
     <div>
       <PageHeader icon={LifeBuoy} title="Helpdesk" subtitle="Raise and track HR, IT, payroll and facilities requests"
-        actions={<button className="btn-primary" onClick={() => add.onOpen()} data-testid="new-ticket"><Plus size={16} /> New ticket</button>} />
+        actions={<button className="btn-primary" onClick={() => { setFile(null); add.onOpen(); }} data-testid="new-ticket"><Plus size={16} /> New ticket</button>} />
       {isHR && <Tabs value={tab} onChange={setTab} tabs={[{ value: 'all', label: 'All tickets' }, { value: 'mine', label: 'My tickets' }]} />}
       <DataTable loading={isLoading} rows={data} searchKeys={['subject', 'category', 'employee_name']} exportName="tickets" onRowClick={(r) => { setOpen(r); setResolution(r.resolution || ''); }}
         toolbar={<select className="input !w-auto" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status filter">
@@ -33,6 +37,7 @@ export default function Helpdesk() {
           { key: 'id', header: '#', width: '70px', render: (r) => <span className="font-mono text-xs muted">#{r.id}</span> },
           { key: 'subject', header: 'Subject', width: 'minmax(240px, 2.5fr)', render: (r) => <div className="min-w-0"><div className="truncate font-semibold">{r.subject}</div><div className="truncate text-xs muted">{r.employee_name} · {timeAgo(r.created_at)}</div></div> },
           { key: 'category', header: 'Category' },
+          { key: 'attachment_count', header: 'Files', width: '70px', render: (r) => (r.attachment_count ? <span className="flex items-center gap-1 text-brand-600 dark:text-brand-400"><Paperclip size={13} />{r.attachment_count}</span> : '—') },
           { key: 'priority', header: 'Priority', render: (r) => <Badge status={r.priority} /> },
           { key: 'assignee_name', header: 'Assignee', render: (r) => r.assignee_name || <span className="muted">Unassigned</span> },
           { key: 'status', header: 'Status', render: (r) => <Badge status={r.status} /> },
@@ -44,7 +49,17 @@ export default function Helpdesk() {
           { name: 'subject', label: 'Subject', required: true, full: true },
           { name: 'description', label: 'Describe the issue', type: 'textarea', required: true, full: true },
         ]}
-        onSubmit={(v) => act('tickets', { body: v, success: 'Ticket raised — HR has been notified' })} />
+        onSubmit={async (v) => {
+          const created = await act('tickets', { body: v });
+          if (!created) return null;
+          if (file) {
+            try { await uploadAttachment('tickets', created.id, file); invalidateFiles('tickets'); } catch (e) { toast(`Ticket raised, but the file failed to upload: ${e.message}`, 'error'); return created; }
+          }
+          toast('Ticket raised — HR has been notified');
+          return created;
+        }}>
+        <FileDrop file={file} onChange={setFile} label="Screenshot or document (optional)" testId="ticket-drop" />
+      </FormModal>
       <Drawer open={!!ticket} onClose={() => setOpen(null)} title={ticket ? `Ticket #${ticket.id}` : ''}>
         {ticket && (
           <div className="space-y-5">
@@ -54,6 +69,8 @@ export default function Helpdesk() {
               <div className="mt-2 flex items-center gap-2 text-sm muted"><Avatar name={ticket.employee_name} color={ticket.avatar_color} size="xs" />{ticket.employee_name} · {dateTime(ticket.created_at)}</div>
             </div>
             <p className="rounded-xl bg-slate-50 p-4 text-sm dark:bg-slate-800">{ticket.description}</p>
+            <Attachments entity="tickets" entityId={ticket.id} related={['tickets']}
+              canUpload={isHR || ((ticket.employee_id === user.id || ticket.assignee_id === user.id) && ['open', 'in_progress'].includes(ticket.status))} />
             {ticket.resolution && !isHR && <div className="rounded-xl bg-emerald-50 p-4 text-sm dark:bg-emerald-500/10"><div className="mb-1 flex items-center gap-1.5 font-semibold"><MessageSquare size={14} /> Resolution</div>{ticket.resolution}</div>}
             {isHR && (
               <div className="space-y-4 border-t border-slate-100 pt-4 dark:border-slate-800">

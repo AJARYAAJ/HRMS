@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { CheckSquare, Check, X, Plane, Clock, Receipt, Timer, Landmark, CheckCheck } from 'lucide-react';
+import { CheckSquare, Check, X, Plane, Clock, Receipt, Timer, Landmark, CheckCheck, Paperclip } from 'lucide-react';
 import { useGet, useAction } from '../lib/hooks';
 import { PageHeader, Tabs, Avatar, Badge, EmptyState, TableSkeleton, Modal } from '../components/ui';
+import { Attachments } from '../components/Files';
 import { timeAgo } from '../lib/format';
 
 const TYPES = {
@@ -19,6 +20,7 @@ export default function Approvals() {
   const [reject, setReject] = useState(null);
   const [comment, setComment] = useState('');
   const [selected, setSelected] = useState(new Set());
+  const [files, setFiles] = useState(null);
 
   const counts = useMemo(() => Object.fromEntries(Object.keys(TYPES).map((t) => [t, data.filter((d) => d.type === t).length])), [data]);
   const items = tab === 'all' ? data : data.filter((d) => d.type === tab);
@@ -63,6 +65,7 @@ export default function Approvals() {
                     </div>
                   </div>
                   <div className="flex gap-2">
+                    {i.type === 'expense' && <button className="btn-ghost btn-sm" onClick={() => setFiles(i)} data-testid="view-receipt"><Paperclip size={14} /> Receipt</button>}
                     <button className="btn-secondary btn-sm text-rose-600" onClick={() => { setReject(i); setComment(''); }} data-testid="reject-btn"><X size={14} /> Reject</button>
                     <button className="btn-success btn-sm" onClick={() => decide(i, 'approved')} data-testid="approve-btn"><Check size={14} /> Approve</button>
                   </div>
@@ -72,6 +75,9 @@ export default function Approvals() {
           </div>
         )}
       </div>
+      <Modal open={!!files} onClose={() => setFiles(null)} title={files ? `Receipts · ${files.employee_name}` : ''}>
+        {files && <><p className="mb-4 text-sm muted">{files.summary}</p><Attachments entity="expenses" entityId={files.id} title="Receipts" canUpload={false} canDelete={false} /></>}
+      </Modal>
       <Modal open={!!reject} onClose={() => setReject(null)} title="Reject request" size="sm"
         footer={<><button className="btn-secondary" onClick={() => setReject(null)}>Cancel</button>
           <button className="btn-danger" onClick={async () => { if (await decide(reject, 'rejected', comment)) setReject(null); }} data-testid="confirm-reject">Reject</button></>}>

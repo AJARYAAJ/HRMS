@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const PORT = 4400;
-const DB = path.join(os.tmpdir(), `peoplehub-e2e-${Date.now()}.db`);
+const RUN = path.join(os.tmpdir(), `peoplehub-e2e-${Date.now()}`);
 
 export default defineConfig({
   testDir: './e2e',
@@ -22,10 +22,10 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } }],
   webServer: {
-    command: 'node --no-warnings server/src/index.js',
+    command: 'node --no-warnings e2e/support/server.js',
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: false,
-    env: { PORT: String(PORT), DB_PATH: DB, RESET_DB: '1' },
+    env: { PORT: String(PORT), DB_PATH: `${RUN}.db`, UPLOAD_DIR: `${RUN}-uploads`, RESET_DB: '1' },
     timeout: 60_000,
   },
 });

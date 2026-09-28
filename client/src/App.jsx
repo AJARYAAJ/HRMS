@@ -7,6 +7,7 @@ import { allRoutes, pages } from './routes';
 import { ShieldAlert, Compass } from 'lucide-react';
 
 const Login = lazy(() => import('./pages/Login'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 
 function RequireAuth({ children }) {
   const token = useSelector((s) => s.auth.token);
@@ -27,6 +28,7 @@ export default function App() {
     <>
       <Routes>
         <Route path="/login" element={<Suspense fallback={null}><Login /></Suspense>} />
+        <Route path="/reset-password" element={<Suspense fallback={null}><ResetPassword /></Suspense>} />
         <Route element={<RequireAuth><Layout /></RequireAuth>}>
           {allRoutes.map((r) => {
             const Page = pages[r.page];

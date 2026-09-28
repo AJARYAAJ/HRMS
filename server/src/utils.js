@@ -1,4 +1,5 @@
 import { all, insert, run } from './db.js';
+import { emailEmployee, appUrl } from './mailer.js';
 
 export const pad = (n) => String(n).padStart(2, '0');
 export const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -73,9 +74,19 @@ export function computePayslip(annualCtc, workingDays, paidDays) {
   return { basic, hra, special, gross, pf, esi, pt, tds, total_deductions, net: round2(gross - total_deductions) };
 }
 
-export function notify(employeeId, title, body, link) {
+/** In-app notification plus a matching email (unless the employee turned email notifications off). */
+export function notify(employeeId, title, body, link, { email = true } = {}) {
   if (!employeeId) return;
   insert('notifications', { employee_id: employeeId, title, body, link });
+  if (email) {
+    emailEmployee(employeeId, {
+      subject: title,
+      heading: title,
+      paragraphs: body ? [body] : [],
+      cta: link ? { url: `${appUrl()}${link}`, label: 'Open in PeopleHub' } : undefined,
+      template: 'notification',
+    });
+  }
 }
 
 export function audit(actorId, action, entity, entityId, details) {

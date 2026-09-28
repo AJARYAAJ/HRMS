@@ -18,7 +18,7 @@ export function crud(opts) {
   const {
     table, fields, owner, readAll = false, write = ['admin', 'hr'], selfService = false,
     filters = [], search = [], order = 't.id DESC', dateField, approval = false,
-    select = `SELECT t.* FROM ${table} t`, validate, afterCreate, onDecision, label = table, approvers,
+    select = `SELECT t.* FROM ${table} t`, validate, afterCreate, onDecision, label = table, approvers, afterDelete,
   } = opts;
   const router = Router();
 
@@ -113,6 +113,7 @@ export function crud(opts) {
     if (!existing) return res.status(404).json({ error: `${label} not found` });
     assertEditable(existing, req.user);
     run(`DELETE FROM ${table} WHERE id = ?`, existing.id);
+    afterDelete?.(existing);
     audit(req.user.id, 'delete', table, existing.id);
     res.json({ ok: true });
   });

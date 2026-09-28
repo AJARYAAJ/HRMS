@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Loader2, ShieldCheck, Clock, Wallet, Users, Sparkles } from 'lucide-react';
+import { Eye, EyeOff, Loader2, ShieldCheck, Clock, Wallet, Users, Sparkles, MailCheck } from 'lucide-react';
+import { Modal } from '../components/ui';
 import { useLoginMutation } from '../store/api';
 import { setCredentials } from '../store/authSlice';
 
@@ -18,6 +19,10 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
+  const [forgot, setForgot] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [sent, setSent] = useState('');
+  const [sending, setSending] = useState(false);
   const [login, { isLoading }] = useLoginMutation();
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -83,10 +88,36 @@ export default function Login() {
               </div>
             </div>
             {error && <div className="rounded-xl bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 dark:bg-rose-500/10 dark:text-rose-400" role="alert">{error}</div>}
+            <div className="flex justify-end -mt-1">
+              <button type="button" className="text-xs font-semibold text-brand-600 hover:underline dark:text-brand-400" onClick={() => { setForgot(true); setSent(''); setResetEmail(email); }}>Forgot password?</button>
+            </div>
             <button type="submit" className="btn-primary w-full py-2.5" disabled={isLoading}>
               {isLoading && <Loader2 size={16} className="animate-spin" />} Sign in
             </button>
           </form>
+          <Modal open={forgot} onClose={() => setForgot(false)} title="Reset your password" size="sm">
+            {sent ? (
+              <div className="space-y-4 text-center" data-testid="reset-sent">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10"><MailCheck size={22} /></div>
+                <p className="text-sm">{sent}</p>
+                <p className="text-xs muted">The link expires in 30 minutes. Check your spam folder if it doesn't arrive.</p>
+                <button className="btn-secondary w-full" onClick={() => setForgot(false)}>Back to sign in</button>
+              </div>
+            ) : (
+              <form className="space-y-4" onSubmit={async (e) => {
+                e.preventDefault();
+                setSending(true);
+                const res = await fetch('/api/auth/forgot-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: resetEmail }) });
+                const body = await res.json().catch(() => ({}));
+                setSending(false);
+                setSent(res.ok ? body.message : body.error || 'Something went wrong');
+              }}>
+                <p className="text-sm muted">Enter your work email and we'll send you a link to choose a new password.</p>
+                <div><label className="label" htmlFor="reset-email">Work email</label><input id="reset-email" type="email" required className="input" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} /></div>
+                <button className="btn-primary w-full" disabled={sending}>{sending ? 'Sending…' : 'Send reset link'}</button>
+              </form>
+            )}
+          </Modal>
           <div className="mt-8">
             <div className="mb-3 flex items-center gap-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
               <span className="h-px flex-1 bg-slate-200 dark:bg-slate-800" /> Demo accounts <span className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />

@@ -4,6 +4,9 @@ import { requireRole, isHR, canManage } from '../auth.js';
 import { crud } from '../crud.js';
 import { httpError, audit, notify, notifyHR, today } from '../utils.js';
 import { createEmployee } from './employees.js';
+import { singleFile, removeFile, deleteAttachmentsFor } from '../uploads.js';
+import { saveAttachment } from './attachments.js';
+import { queueEmail } from '../mailer.js';
 
 const EMP_NAME = (alias) => `${alias}.first_name || ' ' || ${alias}.last_name`;
 
@@ -37,9 +40,10 @@ export const jobsRouter = crud({
 
 const candidatesCrud = crud({
   table: 'candidates', label: 'candidate',
+  afterDelete: (row) => deleteAttachmentsFor('candidates', row.id),
   fields: ['job_id', 'name', 'email', 'phone', 'source', 'stage', 'rating', 'experience_years', 'current_company', 'expected_ctc', 'notes'],
   write: ['admin', 'hr', 'manager'], readAll: true, filters: ['job_id', 'stage'], search: ['t.name', 't.email', 't.current_company'],
-  select: `SELECT t.*, j.title AS job_title FROM candidates t LEFT JOIN job_openings j ON j.id = t.job_id`,
+  select: `SELECT t.*, j.title AS job_title, (SELECT COUNT(*) FROM attachments x WHERE x.entity = 'candidates' AND x.entity_id = t.id) AS attachment_count FROM candidates t LEFT JOIN job_openings j ON j.id = t.job_id`,
 });
 export const candidatesRouter = Router();
 candidatesRouter.use((req, res, next) => (req.user.role === 'employee' ? res.status(403).json({ error: 'Recruitment is restricted to managers and HR' }) : next()));
@@ -84,8 +88,22 @@ export const interviewsRouter = crud({
            FROM interviews t JOIN candidates c ON c.id = t.candidate_id LEFT JOIN job_openings j ON j.id = c.job_id
            LEFT JOIN employees i ON i.id = t.interviewer_id`,
   afterCreate(id, data) {
-    const c = get('SELECT name FROM candidates WHERE id = ?', data.candidate_id);
-    notify(data.interviewer_id, 'Interview scheduled', `${data.round || 'Interview'} with ${c?.name} at ${data.scheduled_at?.replace('T', ' ')}`, '/recruitment');
+    const c = get('SELECT c.name, c.email, j.title FROM candidates c LEFT JOIN job_openings j ON j.id = c.job_id WHERE c.id = ?', data.candidate_id);
+    const when = data.scheduled_at?.replace('T', ' ');
+    notify(data.interviewer_id, 'Interview scheduled', `${data.round || 'Interview'} with ${c?.name} at ${when}`, '/recruitment');
+    // Invite the candidate too (they have no account, so this is email only).
+    if (c?.email) {
+      const company = get("SELECT value FROM settings WHERE key = 'company_name'")?.value || 'our company';
+      queueEmail({
+        to: c.email, toName: c.name, template: 'interview_invite',
+        subject: `Interview invitation: ${c.title || 'your application'} at ${company}`,
+        heading: 'You are invited to interview',
+        greeting: `Hi ${c.name.split(' ')[0]},`,
+        paragraphs: [`Thank you for applying for the ${c.title || 'open'} role. We'd love to speak with you.`],
+        details: [['Round', data.round || 'Interview'], ['When', when], ['Mode', data.mode || 'Video']],
+        footnote: 'Reply to this email if you need to reschedule.',
+      });
+    }
     run("UPDATE candidates SET stage = 'interview' WHERE id = ? AND stage IN ('applied','screening')", data.candidate_id);
   },
 });
@@ -200,9 +218,11 @@ kudosRouter.post('/', (req, res) => {
 // ---------- expenses, projects, timesheets ----------
 export const expensesRouter = crud({
   table: 'expenses', label: 'expense claim', link: '/expenses',
+  afterDelete: (row) => deleteAttachmentsFor('expenses', row.id),
   fields: ['employee_id', 'category', 'amount', 'date', 'description'],
   owner: 'employee_id', selfService: true, approval: true, filters: ['status', 'employee_id', 'category'], dateField: 'date',
-  select: `SELECT t.*, ${EMP_NAME('e')} AS employee_name, e.avatar_color, ${EMP_NAME('a')} AS approver_name
+  select: `SELECT t.*, ${EMP_NAME('e')} AS employee_name, e.avatar_color, ${EMP_NAME('a')} AS approver_name,
+           (SELECT COUNT(*) FROM attachments x WHERE x.entity = 'expenses' AND x.entity_id = t.id) AS attachment_count
            FROM expenses t JOIN employees e ON e.id = t.employee_id LEFT JOIN employees a ON a.id = t.approver_id`,
   validate(data) {
     if (data.amount !== undefined && !(Number(data.amount) > 0)) throw httpError(400, 'Amount must be greater than zero');
@@ -250,9 +270,12 @@ export const assetsRouter = crud({
 });
 
 export const ticketsRouter = crud({
-  table: 'tickets', label: 'ticket', fields: ['employee_id', 'category', 'subject', 'description', 'priority', 'status', 'assignee_id', 'resolution'],
+  table: 'tickets', label: 'ticket',
+  afterDelete: (row) => deleteAttachmentsFor('tickets', row.id),
+  fields: ['employee_id', 'category', 'subject', 'description', 'priority', 'status', 'assignee_id', 'resolution'],
   owner: 'employee_id', selfService: true, filters: ['status', 'priority', 'category', 'employee_id'], search: ['t.subject'],
-  select: `SELECT t.*, ${EMP_NAME('e')} AS employee_name, e.avatar_color, ${EMP_NAME('a')} AS assignee_name
+  select: `SELECT t.*, ${EMP_NAME('e')} AS employee_name, e.avatar_color, ${EMP_NAME('a')} AS assignee_name,
+           (SELECT COUNT(*) FROM attachments x WHERE x.entity = 'tickets' AND x.entity_id = t.id) AS attachment_count
            FROM tickets t JOIN employees e ON e.id = t.employee_id LEFT JOIN employees a ON a.id = t.assignee_id`,
   validate(data, user, existing) {
     if (!existing && !data.subject) throw httpError(400, 'Subject is required');
@@ -305,23 +328,53 @@ export const enrollmentsRouter = crud({
 });
 
 export const documentsRouter = Router();
+const DOC_SELECT = `SELECT d.*, ${EMP_NAME('e')} AS employee_name,
+    f.id AS file_id, f.original_name AS file_name, f.mime_type AS file_type, f.size AS file_size
+  FROM documents d LEFT JOIN employees e ON e.id = d.employee_id
+  LEFT JOIN attachments f ON f.id = (SELECT MAX(id) FROM attachments WHERE entity = 'documents' AND entity_id = d.id)`;
 documentsRouter.get('/', (req, res) => {
   const personal = isHR(req.user) && req.query.employee_id ? Number(req.query.employee_id) : req.user.id;
   res.json(all(
-    `SELECT d.*, ${EMP_NAME('e')} AS employee_name FROM documents d LEFT JOIN employees e ON e.id = d.employee_id
-     WHERE d.employee_id IS NULL OR d.employee_id = ? ${isHR(req.user) && req.query.all ? 'OR 1=1' : ''} ORDER BY d.employee_id IS NOT NULL, d.id DESC`,
+    `${DOC_SELECT} WHERE d.employee_id IS NULL OR d.employee_id = ? ${isHR(req.user) && req.query.all ? 'OR 1=1' : ''} ORDER BY d.employee_id IS NOT NULL, d.id DESC`,
     personal,
   ));
 });
-documentsRouter.post('/', requireRole('admin', 'hr'), (req, res) => {
-  const { title, category, employee_id, content } = req.body;
-  if (!title) throw httpError(400, 'Title is required');
-  const id = insert('documents', { title, category, employee_id: employee_id || null, content });
-  if (employee_id) notify(Number(employee_id), 'New document shared with you', title, '/documents');
-  res.status(201).json(get('SELECT * FROM documents WHERE id = ?', id));
+// HR publishes company-wide or personal documents; employees may upload their own personal documents (KYC, certificates).
+documentsRouter.post('/', singleFile(false), (req, res) => {
+  const { title, category, content } = req.body;
+  const hr = isHR(req.user);
+  const employeeId = hr ? (req.body.employee_id ? Number(req.body.employee_id) : null) : req.user.id;
+  if (!title) {
+    if (req.file) removeFile(req.file.filename);
+    throw httpError(400, 'Title is required');
+  }
+  if (!req.file && !content) throw httpError(400, 'Attach a file or enter the document content');
+  let id;
+  try {
+    id = tx(() => {
+      const docId = insert('documents', { title, category: category || (hr ? 'Policy' : 'Personal'), employee_id: employeeId, content: content || null });
+      if (req.file) saveAttachment(req.file, 'documents', docId, req.user.id);
+      audit(req.user.id, 'create', 'documents', docId, req.file ? { file: req.file.originalname } : undefined);
+      return docId;
+    });
+  } catch (err) {
+    // The transaction rolled back, so don't leave the stored file behind.
+    if (req.file) removeFile(req.file.filename);
+    throw err;
+  }
+  if (hr && employeeId) notify(employeeId, 'New document shared with you', title, '/documents');
+  if (!hr) notifyHR('Employee uploaded a document', `${req.user.first_name} ${req.user.last_name}: ${title}`, '/documents');
+  res.status(201).json(get(`${DOC_SELECT} WHERE d.id = ?`, id));
 });
-documentsRouter.delete('/:id', requireRole('admin', 'hr'), (req, res) => {
-  run('DELETE FROM documents WHERE id = ?', req.params.id);
+documentsRouter.delete('/:id', (req, res) => {
+  const doc = get('SELECT * FROM documents WHERE id = ?', req.params.id);
+  if (!doc) throw httpError(404, 'Document not found');
+  if (!isHR(req.user) && doc.employee_id !== req.user.id) throw httpError(403, 'You cannot delete this document');
+  tx(() => {
+    deleteAttachmentsFor('documents', doc.id);
+    run('DELETE FROM documents WHERE id = ?', doc.id);
+  });
+  audit(req.user.id, 'delete', 'documents', doc.id);
   res.json({ ok: true });
 });
 

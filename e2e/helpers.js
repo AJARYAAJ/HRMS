@@ -55,3 +55,26 @@ export function nextWeekday(offset) {
   while (d.getDay() === 0 || d.getDay() === 6 || HOLIDAYS.has(fmt(d))) d.setDate(d.getDate() + 1);
   return fmt(d);
 }
+
+// ---------- mailbox (real SMTP capture started by e2e/support/server.js) ----------
+const MAILBOX = 'http://localhost:4401/messages';
+
+export async function clearMailbox(request) {
+  await request.delete(MAILBOX);
+}
+
+/** Wait until an email matching `predicate` arrives over SMTP, then return it. */
+export async function waitForEmail(request, predicate, timeout = 15_000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const messages = await (await request.get(MAILBOX)).json();
+    const found = messages.find(predicate);
+    if (found) return found;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  throw new Error('Expected email did not arrive');
+}
+
+export async function mailbox(request) {
+  return (await request.get(MAILBOX)).json();
+}

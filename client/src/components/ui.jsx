@@ -90,6 +90,7 @@ const STATUS_COLOR = {
   pending: 'amber', processed: 'blue', in_progress: 'blue', manager_review: 'violet', self_review: 'amber', scheduled: 'blue',
   half_day: 'amber', late: 'amber', on_notice: 'amber', at_risk: 'amber', on_hold: 'amber', screening: 'blue', interview: 'violet', enrolled: 'slate',
   rejected: 'red', absent: 'red', exited: 'red', cancelled: 'slate', behind: 'red', in_repair: 'amber', retired: 'slate', high: 'red', urgent: 'red',
+  sent: 'green', logged: 'blue', queued: 'slate', retrying: 'amber', failed: 'red',
   medium: 'amber', low: 'slate', leave: 'violet', holiday: 'blue', remote: 'blue', applied: 'slate', admin: 'violet', hr: 'blue', manager: 'amber', employee: 'slate',
 };
 export function Badge({ children, color, status, className = '' }) {

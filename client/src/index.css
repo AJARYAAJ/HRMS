@@ -1,0 +1,67 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-300: #a5b4fc;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-brand-800: #3730a3;
+  --color-brand-900: #312e81;
+  --animate-fade-in: fade-in 0.25s ease-out;
+  --animate-slide-in: slide-in 0.25s ease-out;
+  --animate-pop: pop 0.18s ease-out;
+}
+
+@keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes slide-in { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes pop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-slate-50 text-slate-800 antialiased dark:bg-slate-950 dark:text-slate-200;
+  }
+  ::selection { @apply bg-brand-500/25; }
+  * { scrollbar-width: thin; scrollbar-color: rgb(148 163 184 / 0.5) transparent; }
+}
+
+@utility card { @apply rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900; }
+@utility card-pad { @apply p-5; }
+@utility btn { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer whitespace-nowrap; }
+@utility btn-primary { @apply btn bg-brand-600 text-white shadow-sm shadow-brand-600/30 hover:bg-brand-700; }
+@utility btn-secondary { @apply btn border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700; }
+@utility btn-ghost { @apply btn text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800; }
+@utility btn-danger { @apply btn bg-rose-600 text-white hover:bg-rose-700; }
+@utility btn-success { @apply btn bg-emerald-600 text-white hover:bg-emerald-700; }
+@utility btn-sm { @apply px-3 py-1.5 text-xs rounded-lg; }
+@utility input { @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 transition focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/10 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100; }
+@utility label { @apply mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-400; }
+@utility muted { @apply text-slate-500 dark:text-slate-400; }
+@utility skeleton { @apply relative overflow-hidden rounded-lg bg-slate-200/70 dark:bg-slate-800; }
+@utility nav-link { @apply flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white; }
+@utility tab { @apply relative px-1 pb-3 text-sm font-semibold text-slate-500 transition hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer; }
+
+/* Unlayered so state styles win over the utility layer. */
+.skeleton::after {
+    content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.5), transparent);
+    animation: shimmer 1.4s infinite;
+  }
+  .dark .skeleton::after { background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent); }
+  .nav-link.active { @apply bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300; }
+  .tab.active { @apply text-brand-600 dark:text-brand-400; }
+  .tab.active::after { content: ''; @apply absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-600 dark:bg-brand-400; }
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+  .print-area { box-shadow: none !important; border: none !important; }
+}

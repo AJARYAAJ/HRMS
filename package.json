@@ -1,0 +1,19 @@
+{
+  "name": "peoplehub-hrms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PeopleHub HRMS - full-featured human resource management portal",
+  "workspaces": ["server", "client"],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w client",
+    "start": "npm run start -w server",
+    "seed": "npm run seed -w server",
+    "test:e2e": "npm run build && playwright test",
+    "test:api": "npm test -w server"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "concurrently": "^9.2.1"
+  }
+}

@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { all, get, insert, update, run, tx } from './db.js';
 import { scopeSql, canManage, isHR } from './auth.js';
-import { audit, notify, httpError } from './utils.js';
+import { audit, notify, notifyHR, httpError } from './utils.js';
+import { approvalFlow, recordStep, OPEN_STATUSES } from './workflow.js';
 
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
 
@@ -125,15 +126,28 @@ export function crud(opts) {
       const existing = get(`SELECT * FROM ${table} WHERE id = ?`, req.params.id);
       if (!existing) return res.status(404).json({ error: `${label} not found` });
       const ownerId = existing[owner];
+      const hr = isHR(req.user);
+      const flow = approvers ? 'hr' : approvalFlow(table);
       if (ownerId === req.user.id && req.user.role !== 'admin') throw httpError(403, 'You cannot approve your own request');
-      if (approvers && !approvers.includes(req.user.role)) throw httpError(403, 'Only HR can decide on this');
       if (!canManage(req.user, ownerId)) throw httpError(403, 'Only the reporting manager or HR can decide on this');
-      if (existing.status !== 'pending') throw httpError(400, `This request is already ${existing.status}`);
+      if (!OPEN_STATUSES.includes(existing.status)) throw httpError(400, `This request is already ${existing.status.replace('_', ' ')}`);
+      if (flow === 'hr' && !hr) throw httpError(403, 'Only HR can decide on this');
+      if (existing.status === 'manager_approved' && !hr) throw httpError(403, 'Already approved by the manager; awaiting HR approval');
+
+      // Two-level flow: a manager's approval moves the request on to HR instead of finalising it.
+      const finalStatus = status === 'approved' && flow === 'manager_hr' && !hr ? 'manager_approved' : status;
       tx(() => {
-        update(table, existing.id, { status, approver_id: req.user.id, comment: comment || null });
-        onDecision?.(existing, status, req.user);
-        notify(ownerId, `Your ${label} was ${status}`, comment || `Decision by ${req.user.first_name} ${req.user.last_name}`, opts.link);
-        audit(req.user.id, status, table, existing.id, comment ? { comment } : undefined);
+        update(table, existing.id, { status: finalStatus, approver_id: req.user.id, comment: comment || null });
+        recordStep(table, existing.id, hr ? 'hr' : 'manager', req.user.id, status, comment);
+        if (finalStatus !== 'manager_approved') onDecision?.(existing, finalStatus, req.user);
+        const by = `${req.user.first_name} ${req.user.last_name}`;
+        if (finalStatus === 'manager_approved') {
+          notify(ownerId, `Your ${label} was approved by your manager`, `Approved by ${by}; now awaiting HR approval.`, opts.link);
+          notifyHR(`${label[0].toUpperCase()}${label.slice(1)} awaiting HR approval`, `Approved by ${by}`, '/approvals');
+        } else {
+          notify(ownerId, `Your ${label} was ${finalStatus}`, comment || `Decision by ${by}`, opts.link);
+        }
+        audit(req.user.id, finalStatus, table, existing.id, comment ? { comment } : undefined);
       });
       res.json(get(`${select} WHERE t.id = ?`, existing.id));
     });

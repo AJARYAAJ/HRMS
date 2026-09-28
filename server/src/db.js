@@ -18,6 +18,53 @@ export function migrate() {
     if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
   };
   addColumn('employees', 'email_notifications', 'INTEGER NOT NULL DEFAULT 1');
+  addColumn('employees', 'company_id', 'INTEGER REFERENCES companies(id) ON DELETE SET NULL');
+  addColumn('employees', 'probation_end_date', 'TEXT');
+  addColumn('employees', 'confirmation_status', "TEXT DEFAULT 'confirmed'");
+  addColumn('employees', 'tax_regime', "TEXT DEFAULT 'new'");
+  addColumn('locations', 'latitude', 'REAL');
+  addColumn('locations', 'longitude', 'REAL');
+  addColumn('locations', 'radius_m', 'INTEGER DEFAULT 300');
+  addColumn('attendance', 'latitude', 'REAL');
+  addColumn('attendance', 'longitude', 'REAL');
+  addColumn('attendance', 'geo_status', 'TEXT');
+  addColumn('attendance', 'overtime_mins', 'INTEGER DEFAULT 0');
+  addColumn('payslips', 'company_id', 'INTEGER');
+  addColumn('payslips', 'reimbursement', 'REAL DEFAULT 0');
+  addColumn('payslips', 'loan_deduction', 'REAL DEFAULT 0');
+  addColumn('payslips', 'tax_regime', "TEXT DEFAULT 'new'");
+  addColumn('expenses', 'payslip_id', 'INTEGER');
+  addColumn('documents', 'requires_ack', 'INTEGER DEFAULT 0');
+  addColumn('surveys', 'type', "TEXT DEFAULT 'poll'");
+  addColumn('email_outbox', 'attachments', 'TEXT');
+
+  // Databases created before multi-company support: give existing people a default legal entity.
+  if (get('SELECT id FROM employees LIMIT 1') && !get('SELECT id FROM companies LIMIT 1')) {
+    const setting = (k, d) => get('SELECT value FROM settings WHERE key = ?', k)?.value || d;
+    run('INSERT INTO companies (name, legal_name, pan, tan, address) VALUES (?, ?, ?, ?, ?)',
+      setting('company_short', 'Main company'), setting('company_name', 'Main company'), setting('company_pan', null), setting('company_tan', null), setting('company_address', null));
+  }
+  const defaultCompany = get('SELECT id FROM companies ORDER BY id LIMIT 1')?.id;
+  if (defaultCompany) run('UPDATE employees SET company_id = ? WHERE company_id IS NULL', defaultCompany);
+
+  // payroll_runs used to allow one run per month; it is now one run per month per company.
+  const runsSql = get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'payroll_runs'")?.sql || '';
+  if (!runsSql.includes('company_id')) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    tx(() => {
+      db.exec(`CREATE TABLE payroll_runs_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, month TEXT NOT NULL, company_id INTEGER,
+        status TEXT NOT NULL DEFAULT 'processed', employees INTEGER DEFAULT 0, total_gross REAL DEFAULT 0,
+        total_deductions REAL DEFAULT 0, total_net REAL DEFAULT 0, processed_by INTEGER,
+        processed_at TEXT DEFAULT (datetime('now')), paid_at TEXT, UNIQUE(month, company_id))`);
+      run(`INSERT INTO payroll_runs_new (id, month, company_id, status, employees, total_gross, total_deductions, total_net, processed_by, processed_at, paid_at)
+           SELECT id, month, ?, status, employees, total_gross, total_deductions, total_net, processed_by, processed_at, paid_at FROM payroll_runs`, defaultCompany ?? null);
+      db.exec('DROP TABLE payroll_runs');
+      db.exec('ALTER TABLE payroll_runs_new RENAME TO payroll_runs');
+      if (defaultCompany) run('UPDATE payslips SET company_id = ? WHERE company_id IS NULL', defaultCompany);
+    });
+    db.exec('PRAGMA foreign_keys = ON');
+  }
 }
 
 export function resetDb() {

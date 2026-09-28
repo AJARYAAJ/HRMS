@@ -11,8 +11,39 @@ export const attendanceRouter = Router();
 export const leaveRouter = Router();
 
 const DEFAULT_SHIFT = { start_time: '09:30', end_time: '18:30', grace_minutes: 15 };
-const shiftFor = (employeeId) =>
-  get('SELECT s.* FROM shifts s JOIN employees e ON e.shift_id = s.id WHERE e.id = ?', employeeId) || DEFAULT_SHIFT;
+/** Shift for a given day: a roster assignment wins over the employee's default shift. */
+export const shiftFor = (employeeId, date = today()) =>
+  get('SELECT s.* FROM shift_roster r JOIN shifts s ON s.id = r.shift_id WHERE r.employee_id = ? AND r.date = ?', employeeId, date)
+  || get('SELECT s.* FROM shifts s JOIN employees e ON e.shift_id = s.id WHERE e.id = ?', employeeId) || DEFAULT_SHIFT;
+
+/** Great-circle distance in metres. */
+export function distanceMetres(lat1, lon1, lat2, lon2) {
+  const rad = (d) => (d * Math.PI) / 180;
+  const a = Math.sin(rad(lat2 - lat1) / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(rad(lon2 - lon1) / 2) ** 2;
+  return Math.round(6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+/**
+ * Geofence check against the employee's office. Mode (settings.geofence_mode):
+ *   off – ignore location, flag – record inside/outside, enforce – block office clock-ins outside the fence.
+ */
+function checkGeofence(employeeId, lat, lng, workMode) {
+  const mode = get("SELECT value FROM settings WHERE key = 'geofence_mode'")?.value || 'flag';
+  const hasFix = Number.isFinite(lat) && Number.isFinite(lng);
+  if (mode === 'off') return { geo_status: null, latitude: hasFix ? lat : null, longitude: hasFix ? lng : null };
+  const loc = get('SELECT l.* FROM locations l JOIN employees e ON e.location_id = l.id WHERE e.id = ?', employeeId);
+  if (!hasFix) {
+    if (mode === 'enforce' && workMode === 'office' && loc?.latitude != null) throw httpError(400, 'Location access is required to clock in from the office');
+    return { geo_status: 'unknown', latitude: null, longitude: null };
+  }
+  if (loc?.latitude == null || loc?.longitude == null) return { geo_status: 'unknown', latitude: lat, longitude: lng };
+  const distance = distanceMetres(lat, lng, loc.latitude, loc.longitude);
+  const inside = distance <= (loc.radius_m || 300);
+  if (!inside && mode === 'enforce' && workMode === 'office') {
+    throw httpError(400, `You are ${distance >= 1000 ? `${(distance / 1000).toFixed(1)} km` : `${distance} m`} from ${loc.name}. Move within ${loc.radius_m || 300} m or choose Remote / Field.`);
+  }
+  return { geo_status: inside ? 'inside' : 'outside', latitude: lat, longitude: lng, distance };
+}
 
 export function evaluateDay(clockIn, clockOut, shift) {
   const late = minutes(clockIn) > minutes(shift.start_time) + (shift.grace_minutes ?? 15) ? 1 : 0;
@@ -35,9 +66,10 @@ attendanceRouter.post('/clock-in', (req, res) => {
   const time = nowTime();
   const { late } = evaluateDay(time, null, shiftFor(req.user.id));
   const work_mode = ['office', 'remote', 'field'].includes(req.body?.work_mode) ? req.body.work_mode : 'office';
-  if (existing) update('attendance', existing.id, { clock_in: time, status: 'present', late, work_mode });
-  else insert('attendance', { employee_id: req.user.id, date: today(), clock_in: time, status: 'present', late, work_mode });
-  audit(req.user.id, 'clock_in', 'attendance', null, { time, work_mode });
+  const { distance, ...geo } = checkGeofence(req.user.id, Number(req.body?.latitude ?? NaN), Number(req.body?.longitude ?? NaN), work_mode);
+  if (existing) update('attendance', existing.id, { clock_in: time, status: 'present', late, work_mode, ...geo });
+  else insert('attendance', { employee_id: req.user.id, date: today(), clock_in: time, status: 'present', late, work_mode, ...geo });
+  audit(req.user.id, 'clock_in', 'attendance', null, { time, work_mode, ...geo, distance });
   res.json(get('SELECT * FROM attendance WHERE employee_id = ? AND date = ?', req.user.id, today()));
 });
 
@@ -47,8 +79,11 @@ attendanceRouter.post('/clock-out', (req, res) => {
   if (rec.clock_out) throw httpError(400, `Already clocked out at ${rec.clock_out}`);
   let time = nowTime();
   if (minutes(time) < minutes(rec.clock_in)) time = rec.clock_in;
-  const { status, late } = evaluateDay(rec.clock_in, time, shiftFor(req.user.id));
-  update('attendance', rec.id, { clock_out: time, status, late });
+  const shift = shiftFor(req.user.id);
+  const { status, late } = evaluateDay(rec.clock_in, time, shift);
+  // Time beyond the scheduled shift length counts as overtime.
+  const overtime = Math.max(0, (minutes(time) - minutes(rec.clock_in)) - (minutes(shift.end_time) - minutes(shift.start_time)));
+  update('attendance', rec.id, { clock_out: time, status, late, overtime_mins: overtime });
   audit(req.user.id, 'clock_out', 'attendance', rec.id, { time });
   res.json(get('SELECT * FROM attendance WHERE id = ?', rec.id));
 });
@@ -59,10 +94,14 @@ attendanceRouter.get('/', (req, res) => {
   const month = req.query.month || today().slice(0, 7);
   const { start, end } = monthRange(month);
   const records = all('SELECT * FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ? ORDER BY date', employeeId, start, end);
-  const holidays = all('SELECT * FROM holidays WHERE date BETWEEN ? AND ?', start, end);
+  const holidays = all(
+    `SELECT h.*, EXISTS(SELECT 1 FROM optional_holiday_choices c WHERE c.holiday_id = h.id AND c.employee_id = ?) AS opted
+     FROM holidays h WHERE h.date BETWEEN ? AND ?`, employeeId, start, end,
+  ).filter((h) => h.type !== 'Optional' || h.opted);
   const upto = end < today() ? end : today();
-  const workingDays = upto >= start ? workingDaysBetween(start, upto) : 0;
+  const workingDays = upto >= start ? workingDaysBetween(start, upto, holidaySet(employeeId)) : 0;
   const count = (s) => records.filter((r) => r.status === s).length;
+  const overtimeMins = records.reduce((a, r) => a + (r.overtime_mins || 0), 0);
   const workedMins = records.reduce((a, r) => a + (r.clock_out ? minutes(r.clock_out) - minutes(r.clock_in) : 0), 0);
   const daysWithHours = records.filter((r) => r.clock_out).length;
   const present = count('present') + count('half_day') * 0.5;
@@ -74,6 +113,8 @@ attendanceRouter.get('/', (req, res) => {
       absent: Math.max(0, workingDays - count('present') - count('half_day') - count('leave')),
       late: records.filter((r) => r.late).length,
       remote: records.filter((r) => r.work_mode === 'remote').length,
+      overtime_hours: Math.round((overtimeMins / 60) * 10) / 10,
+      outside_geofence: records.filter((r) => r.geo_status === 'outside').length,
       avg_hours: daysWithHours ? Math.round((workedMins / daysWithHours / 60) * 10) / 10 : 0,
       attendance_pct: workingDays ? Math.round(((present + count('leave')) / workingDays) * 100) : 0,
     },
@@ -131,7 +172,7 @@ export const regularizationsRouter = crud({
   },
   onDecision(row, status) {
     if (status !== 'approved') return;
-    const { status: dayStatus, late } = evaluateDay(row.clock_in, row.clock_out, shiftFor(row.employee_id));
+    const { status: dayStatus, late } = evaluateDay(row.clock_in, row.clock_out, shiftFor(row.employee_id, row.date));
     const rec = get('SELECT id FROM attendance WHERE employee_id = ? AND date = ?', row.employee_id, row.date);
     const data = { clock_in: row.clock_in, clock_out: row.clock_out, status: dayStatus, late, notes: 'Regularized' };
     if (rec) update('attendance', rec.id, data);
@@ -161,7 +202,7 @@ function balancesFor(employeeId, year) {
   return all(
     `SELECT lt.id AS leave_type_id, lt.name, lt.code, lt.color, lt.paid, b.allocated, b.used,
             COALESCE((SELECT SUM(days) FROM leave_requests r WHERE r.employee_id = b.employee_id
-              AND r.leave_type_id = lt.id AND r.status = 'pending' AND substr(r.start_date,1,4) = ?), 0) AS pending
+              AND r.leave_type_id = lt.id AND r.status IN ('pending','manager_approved') AND substr(r.start_date,1,4) = ?), 0) AS pending
      FROM leave_balances b JOIN leave_types lt ON lt.id = b.leave_type_id
      WHERE b.employee_id = ? AND b.year = ? ORDER BY lt.id`,
     String(year), employeeId, year,
@@ -181,14 +222,14 @@ leaveRouter.get('/calendar', (req, res) => {
     `SELECT r.id, r.start_date, r.end_date, r.days, r.status, lt.name AS leave_type, lt.color,
             e.id AS employee_id, e.first_name || ' ' || e.last_name AS employee_name, e.avatar_color
      FROM leave_requests r JOIN employees e ON e.id = r.employee_id JOIN leave_types lt ON lt.id = r.leave_type_id
-     WHERE r.status IN ('approved','pending') AND r.start_date <= ? AND r.end_date >= ? ORDER BY r.start_date`,
+     WHERE r.status IN ('approved','pending','manager_approved') AND r.start_date <= ? AND r.end_date >= ? ORDER BY r.start_date`,
     end, start,
   );
   res.json({ leaves, holidays: all('SELECT * FROM holidays WHERE date BETWEEN ? AND ? ORDER BY date', start, end) });
 });
 
 function markLeaveAttendance(row) {
-  const holidays = holidaySet();
+  const holidays = holidaySet(row.employee_id);
   for (let d = parseDate(row.start_date); d <= parseDate(row.end_date); d.setDate(d.getDate() + 1)) {
     const date = ymd(d);
     if (isWeekend(d) || holidays.has(date)) continue;
@@ -221,10 +262,10 @@ const requestsCrud = crud({
     if (m.end_date < m.start_date) throw httpError(400, 'End date cannot be before start date');
     const half = m.half_day ? 1 : 0;
     if (half && m.start_date !== m.end_date) throw httpError(400, 'Half-day leave must be a single day');
-    const days = half ? 0.5 : workingDaysBetween(m.start_date, m.end_date);
+    const days = half ? 0.5 : workingDaysBetween(m.start_date, m.end_date, holidaySet(m.employee_id ?? user.id));
     if (days <= 0) throw httpError(400, 'Selected dates fall on weekends or holidays');
     const overlap = get(
-      `SELECT id FROM leave_requests WHERE employee_id = ? AND status IN ('pending','approved')
+      `SELECT id FROM leave_requests WHERE employee_id = ? AND status IN ('pending','manager_approved','approved')
        AND start_date <= ? AND end_date >= ? AND id != ?`,
       m.employee_id, m.end_date, m.start_date, existing?.id ?? 0,
     );
@@ -233,7 +274,7 @@ const requestsCrud = crud({
     if (!type) throw httpError(400, 'Unknown leave type');
     if (type.code !== 'LOP') {
       const bal = balancesFor(m.employee_id, Number(m.start_date.slice(0, 4))).find((b) => b.leave_type_id === type.id);
-      const available = (bal?.available ?? 0) + (existing?.status === 'pending' ? existing.days : 0);
+      const available = (bal?.available ?? 0) + (['pending', 'manager_approved'].includes(existing?.status) ? existing.days : 0);
       if (days > available) throw httpError(400, `Insufficient ${type.name} balance: ${available} day(s) available, ${days} requested`);
     }
     return { ...data, days, half_day: half };
@@ -257,7 +298,7 @@ leaveRouter.post('/requests/:id/cancel', (req, res) => {
   const row = get('SELECT * FROM leave_requests WHERE id = ?', req.params.id);
   if (!row) throw httpError(404, 'Leave request not found');
   if (row.employee_id !== req.user.id && !isHR(req.user)) throw httpError(403, 'Not allowed');
-  if (!['pending', 'approved'].includes(row.status)) throw httpError(400, `Cannot cancel a ${row.status} request`);
+  if (!['pending', 'manager_approved', 'approved'].includes(row.status)) throw httpError(400, `Cannot cancel a ${row.status} request`);
   if (row.status === 'approved') {
     run('UPDATE leave_balances SET used = MAX(0, used - ?) WHERE employee_id = ? AND leave_type_id = ? AND year = ?',
       row.days, row.employee_id, row.leave_type_id, Number(row.start_date.slice(0, 4)));

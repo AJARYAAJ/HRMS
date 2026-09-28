@@ -10,14 +10,15 @@ export const authRouter = Router();
 export const employeesRouter = Router();
 
 const EMP_SELECT = `
-  SELECT t.*, d.name AS department, g.title AS designation, l.name AS location, s.name AS shift,
+  SELECT t.*, d.name AS department, g.title AS designation, l.name AS location, s.name AS shift, c.name AS company_name,
          m.first_name || ' ' || m.last_name AS manager_name
   FROM employees t
   LEFT JOIN departments d ON d.id = t.department_id
   LEFT JOIN designations g ON g.id = t.designation_id
   LEFT JOIN locations l ON l.id = t.location_id
   LEFT JOIN shifts s ON s.id = t.shift_id
-  LEFT JOIN employees m ON m.id = t.manager_id`;
+  LEFT JOIN employees m ON m.id = t.manager_id
+  LEFT JOIN companies c ON c.id = t.company_id`;
 
 const SENSITIVE = ['pan', 'uan', 'bank_name', 'bank_account', 'ifsc', 'annual_ctc', 'address', 'emergency_contact', 'marital_status', 'blood_group'];
 const COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6'];
@@ -46,7 +47,7 @@ export function loginHandler(req, res) {
 authRouter.get('/me', (req, res) => {
   const me = get(`${EMP_SELECT} WHERE t.id = ?`, req.user.id);
   const reports = all('SELECT id FROM employees WHERE manager_id = ?', req.user.id).length;
-  res.json({ ...sanitize(me, req.user), direct_reports: reports });
+  res.json({ ...sanitize(me, req.user), direct_reports: reports, custom_fields: customFieldsFor(req.user.id) });
 });
 
 authRouter.post('/change-password', (req, res) => {
@@ -105,7 +106,10 @@ authRouter.put('/profile', (req, res) => {
   const allowed = ['phone', 'address', 'emergency_contact', 'marital_status', 'blood_group', 'bank_name', 'bank_account', 'ifsc', 'email_notifications'];
   const data = Object.fromEntries(allowed.filter((k) => k in req.body).map((k) => [k, req.body[k]]));
   if ('email_notifications' in data) data.email_notifications = data.email_notifications ? 1 : 0;
-  update('employees', req.user.id, data);
+  tx(() => {
+    update('employees', req.user.id, data);
+    if (req.body.custom && typeof req.body.custom === 'object') saveCustomFields(req.user.id, req.body.custom, req.user);
+  });
   audit(req.user.id, 'update_profile', 'employees', req.user.id);
   res.json(sanitize(get(`${EMP_SELECT} WHERE t.id = ?`, req.user.id), req.user));
 });
@@ -114,7 +118,8 @@ authRouter.put('/profile', (req, res) => {
 employeesRouter.get('/', (req, res) => {
   const where = ['1=1'];
   const params = [];
-  const { q, department_id, location_id, status, role, manager_id, employment_type } = req.query;
+  const { q, department_id, location_id, status, role, manager_id, employment_type, company_id } = req.query;
+  if (company_id) { where.push('t.company_id = ?'); params.push(company_id); }
   if (q) {
     where.push(`(t.first_name || ' ' || t.last_name LIKE ? OR t.email LIKE ? OR t.emp_code LIKE ? OR g.title LIKE ?)`);
     params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
@@ -143,13 +148,59 @@ employeesRouter.get('/:id', (req, res) => {
   if (!emp) throw httpError(404, 'Employee not found');
   const reports = all(`${EMP_SELECT} WHERE t.manager_id = ? AND t.status != 'exited'`, emp.id).map((r) => sanitize(r, req.user));
   const canSeeTeam = isHR(req.user) || req.user.id === emp.id || reportIds(req.user.id).includes(emp.id);
-  res.json({ ...sanitize(emp, req.user), reports, can_manage: canSeeTeam });
+  const full = isHR(req.user) || req.user.id === emp.id;
+  res.json({ ...sanitize(emp, req.user), reports, can_manage: canSeeTeam, custom_fields: full ? customFieldsFor(emp.id) : [] });
+});
+
+/** Custom profile fields (defined by HR in Settings) with this employee's values. */
+export function customFieldsFor(employeeId) {
+  return all(
+    `SELECT f.*, v.value FROM custom_fields f LEFT JOIN custom_field_values v ON v.field_id = f.id AND v.employee_id = ?
+     ORDER BY f.section, f.sort_order, f.id`,
+    employeeId,
+  ).map((f) => ({ ...f, options: f.options ? JSON.parse(f.options) : null }));
+}
+
+export function saveCustomFields(employeeId, values, user) {
+  const fields = all('SELECT * FROM custom_fields');
+  for (const f of fields) {
+    if (!(f.field_key in values)) continue;
+    if (!isHR(user) && !f.employee_editable) continue;
+    let v = values[f.field_key];
+    v = v === null || v === undefined ? '' : String(v).trim();
+    if (f.required && !v) throw httpError(400, `${f.label} is required`);
+    if (v && f.type === 'number' && Number.isNaN(Number(v))) throw httpError(400, `${f.label} must be a number`);
+    if (v && f.type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw httpError(400, `${f.label} must be a date`);
+    if (v && f.type === 'select' && !JSON.parse(f.options || '[]').includes(v)) throw httpError(400, `${f.label} has an invalid option`);
+    run('INSERT OR REPLACE INTO custom_field_values (employee_id, field_id, value) VALUES (?, ?, ?)', employeeId, f.id, v || null);
+  }
+}
+
+// Probation review: confirm the employee or extend probation.
+employeesRouter.post('/:id/confirmation', requireRole('admin', 'hr'), (req, res) => {
+  const emp = get('SELECT * FROM employees WHERE id = ?', req.params.id);
+  if (!emp) throw httpError(404, 'Employee not found');
+  const { action, extend_days: extendDays, comment } = req.body;
+  if (action === 'confirm') {
+    update('employees', emp.id, { confirmation_status: 'confirmed' });
+    notify(emp.id, 'Congratulations — your employment is confirmed! 🎉', comment || 'You have successfully completed your probation period.', `/employees/${emp.id}`);
+  } else if (action === 'extend') {
+    const days = Number(extendDays);
+    if (!(days >= 15 && days <= 180)) throw httpError(400, 'Extension must be between 15 and 180 days');
+    const base = new Date(emp.probation_end_date || today());
+    base.setDate(base.getDate() + days);
+    update('employees', emp.id, { confirmation_status: 'extended', probation_end_date: base.toISOString().slice(0, 10) });
+    notify(emp.id, 'Probation extended', `Your probation has been extended to ${base.toISOString().slice(0, 10)}. ${comment || ''}`.trim(), `/employees/${emp.id}`);
+  } else throw httpError(400, 'Action must be confirm or extend');
+  audit(req.user.id, `probation_${action}`, 'employees', emp.id, { comment, extend_days: extendDays });
+  res.json(sanitize(get(`${EMP_SELECT} WHERE t.id = ?`, emp.id), req.user));
 });
 
 const EDITABLE = [
   'emp_code', 'first_name', 'last_name', 'email', 'phone', 'role', 'department_id', 'designation_id', 'location_id',
   'shift_id', 'manager_id', 'date_of_joining', 'date_of_birth', 'gender', 'marital_status', 'blood_group',
   'employment_type', 'status', 'address', 'emergency_contact', 'pan', 'uan', 'bank_name', 'bank_account', 'ifsc', 'annual_ctc',
+  'company_id', 'probation_end_date', 'confirmation_status', 'tax_regime',
 ];
 
 function nextEmpCode() {
@@ -197,6 +248,14 @@ export function createEmployee(body, actorId) {
   data.date_of_joining ||= today();
   data.role ||= 'employee';
   data.status ||= 'active';
+  data.company_id ||= get('SELECT id FROM companies ORDER BY id LIMIT 1')?.id ?? null;
+  if (!data.probation_end_date) {
+    const days = Number(get("SELECT value FROM settings WHERE key = 'probation_days'")?.value) || 90;
+    const d = new Date(data.date_of_joining);
+    d.setDate(d.getDate() + days);
+    data.probation_end_date = d.toISOString().slice(0, 10);
+  }
+  data.confirmation_status ||= 'probation';
   data.avatar_color = COLORS[Math.floor(Math.random() * COLORS.length)];
   data.password_hash = bcrypt.hashSync(body.password || 'Welcome@123', 10);
   return tx(() => {
@@ -229,7 +288,10 @@ employeesRouter.put('/:id', requireRole('admin', 'hr'), (req, res) => {
   if (data.role === 'admin' && req.user.role !== 'admin') throw httpError(403, 'Only admins can grant the admin role');
   if (data.manager_id && Number(data.manager_id) === emp.id) throw httpError(400, 'An employee cannot report to themselves');
   if (data.email && get('SELECT id FROM employees WHERE lower(email) = lower(?) AND id != ?', data.email, emp.id)) throw httpError(409, 'Email already in use');
-  update('employees', emp.id, data);
+  tx(() => {
+    update('employees', emp.id, data);
+    if (req.body.custom && typeof req.body.custom === 'object') saveCustomFields(emp.id, req.body.custom, req.user);
+  });
   audit(req.user.id, 'update', 'employees', emp.id, { fields: Object.keys(data) });
   res.json(sanitize(get(`${EMP_SELECT} WHERE t.id = ?`, emp.id), req.user));
 });

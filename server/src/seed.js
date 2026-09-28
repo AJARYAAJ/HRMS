@@ -3,30 +3,12 @@ import { fileURLToPath } from 'node:url';
 import { db, migrate, resetDb, insert, run, get, all, tx } from './db.js';
 import { ymd, pad, isWeekend, parseDate, computePayslip, monthRange, workingDaysBetween, ensureLeaveBalances } from './utils.js';
 import { createTasks } from './routes/employees.js';
+import { classifier, rollupDay, evaluateAlerts } from './routes/activity.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { UPLOAD_DIR } from './uploads.js';
-
-/** Minimal valid single-page PDF so seeded policies have real, previewable files. */
-function makePdf(title, lines) {
-  const esc = (t) => t.replace(/[\\()]/g, (c) => `\\${c}`);
-  const text = [`BT /F1 20 Tf 60 780 Td (${esc(title)}) Tj ET`, ...lines.map((l, i) => `BT /F1 11 Tf 60 ${740 - i * 18} Td (${esc(l)}) Tj ET`)].join('\n');
-  const objs = [
-    '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
-    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
-    `<< /Length ${Buffer.byteLength(text)} >>\nstream\n${text}\nendstream`,
-  ];
-  let out = '%PDF-1.4\n';
-  const offsets = [];
-  objs.forEach((o, i) => { offsets.push(Buffer.byteLength(out)); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
-  const xref = Buffer.byteLength(out);
-  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
-  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
-  return Buffer.from(out);
-}
+import { buildPdf } from './pdf.js';
 
 function seedFile(entity, entityId, name, buffer, uploadedBy) {
   const stored = `${crypto.randomUUID()}${path.extname(name)}`;
@@ -112,12 +94,27 @@ export function seed({ reset = true } = {}) {
       company_phone: '+91 80 4000 1234', company_address: 'Outer Ring Road, Bellandur, Bengaluru 560103',
       company_pan: 'AABCN1234F', company_tan: 'BLRN01234E', currency: 'INR', timezone: 'Asia/Kolkata',
       week_off: 'Saturday, Sunday', fy_start: 'April', payroll_day: '28',
+      notice_period_days: '60', probation_days: '90', optional_holiday_limit: '2', carry_forward_cap: '30', geofence_mode: 'flag',
+      payroll_basic_pct: '50', payroll_hra_pct: '40', screenshots_enabled: '1', screenshot_interval_mins: '10',
     };
     for (const [k, v] of Object.entries(settings)) run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', k, v);
 
     const dept = Object.fromEntries(DEPARTMENTS.map(([name, code, description]) => [name, insert('departments', { name, code, description })]));
     const desig = Object.fromEntries(DESIGNATIONS.map(([title, level]) => [title, insert('designations', { title, level })]));
-    const loc = LOCATIONS.map(([name, city, state, address]) => insert('locations', { name, city, state, address }));
+    // Office coordinates drive geofenced clock-in (Remote has none).
+    const COORDS = { 'Bengaluru HQ': [12.9256, 77.6762], 'Mumbai Office': [19.0660, 72.8691], 'Pune Office': [18.5913, 73.7389] };
+    const loc = LOCATIONS.map(([name, city, state, address]) => insert('locations', {
+      name, city, state, address, latitude: COORDS[name]?.[0] ?? null, longitude: COORDS[name]?.[1] ?? null, radius_m: COORDS[name] ? 300 : null,
+    }));
+    // A group with two legal entities; payroll runs and payslips are per company.
+    const mainCo = insert('companies', {
+      name: 'Nimbus Technologies', legal_name: 'Nimbus Technologies Pvt. Ltd.', pan: 'AABCN1234F', tan: 'BLRN01234E', gstin: '29AABCN1234F1Z5',
+      pf_code: 'KNBNG0012345000', esi_code: '53000123450001001', address: 'Outer Ring Road, Bellandur, Bengaluru 560103', city: 'Bengaluru', state: 'Karnataka',
+    });
+    const digitalCo = insert('companies', {
+      name: 'Nimbus Digital Services', legal_name: 'Nimbus Digital Services LLP', pan: 'AAKFN5678Q', tan: 'PNEN05678D', gstin: '27AAKFN5678Q1Z2',
+      pf_code: 'PUPUN0067890000', esi_code: '33000678900001002', address: 'Hinjewadi Phase 1, Pune 411057', city: 'Pune', state: 'Maharashtra',
+    });
     const general = insert('shifts', { name: 'General', start_time: '09:30', end_time: '18:30', grace_minutes: 15 });
     insert('shifts', { name: 'Early', start_time: '07:00', end_time: '16:00', grace_minutes: 10 });
     const late = insert('shifts', { name: 'US Overlap', start_time: '13:00', end_time: '22:00', grace_minutes: 15 });
@@ -130,6 +127,8 @@ export function seed({ reset = true } = {}) {
     const colors = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6'];
     let code = 1001;
     const mk = (e) => insert('employees', {
+      company_id: e.location_id === loc[2] || ['Customer Success', 'Marketing'].includes(Object.keys(dept).find((k) => dept[k] === e.department_id)) ? digitalCo : mainCo,
+      confirmation_status: 'confirmed', tax_regime: 'new',
       emp_code: `EMP${code++}`, password_hash: hash, shift_id: general, location_id: loc[0], employment_type: 'Full-time',
       status: 'active', avatar_color: pick(colors), gender: pick(['Male', 'Female']), blood_group: pick(['A+', 'B+', 'O+', 'AB+', 'O-']),
       marital_status: pick(['Single', 'Married']), phone: `+91 9${between(100000000, 999999999)}`,
@@ -204,6 +203,12 @@ export function seed({ reset = true } = {}) {
     for (const e of emps) {
       ensureLeaveBalances(e.id, year);
       if (e.date_of_joining >= ymd(addDays(today, -45))) createTasks(e.id, 'onboarding', e.date_of_joining);
+      // Anyone who joined in the last 6 months is still on probation (90 days by default, some extended).
+      if (e.date_of_joining >= ymd(addDays(today, -180))) {
+        const end = addDays(new Date(`${e.date_of_joining}T00:00:00`), 90);
+        run("UPDATE employees SET probation_end_date = ?, confirmation_status = ? WHERE id = ?", ymd(end), end < today ? 'extended' : 'probation', e.id);
+        if (end < today) run('UPDATE employees SET probation_end_date = ? WHERE id = ?', ymd(addDays(today, 12)), e.id);
+      }
       if (e.status === 'on_notice') {
         run('UPDATE employees SET exit_date = ? WHERE id = ?', ymd(addDays(today, between(10, 50))), e.id);
         createTasks(e.id, 'offboarding', ymd(addDays(today, -5)));
@@ -213,7 +218,7 @@ export function seed({ reset = true } = {}) {
     run("UPDATE onboarding_tasks SET done = 1 WHERE due_date < ? AND id % 3 != 0", todayStr);
 
     // ---------- attendance (last 75 days) and productivity (last 21 days) ----------
-    const holidaySet = new Set(HOLIDAYS.map((h) => h[1]));
+    const holidaySet = new Set(HOLIDAYS.filter((h) => h[2] !== 'Optional').map((h) => h[1]));
     const attStmt = db.prepare('INSERT INTO attendance (employee_id, date, clock_in, clock_out, status, work_mode, late) VALUES (?, ?, ?, ?, ?, ?, ?)');
     const prodStmt = db.prepare('INSERT INTO productivity (employee_id, date, productive_mins, neutral_mins, unproductive_mins, idle_mins, top_apps) VALUES (?, ?, ?, ?, ?, ?, ?)');
     for (const e of emps) {
@@ -291,16 +296,18 @@ export function seed({ reset = true } = {}) {
       const month = `${md.getFullYear()}-${pad(md.getMonth() + 1)}`;
       const { start, end } = monthRange(month);
       const wd = workingDaysBetween(start, end, holidaySet);
-      const runId = insert('payroll_runs', { month, status: 'paid', processed_by: hr, processed_at: `${end} 10:00:00`, paid_at: `${end} 18:00:00` });
-      let g = 0, dd = 0, n = 0;
-      const payees = all(`SELECT * FROM employees WHERE annual_ctc > 0 AND date_of_joining <= ? AND (status != 'exited' OR exit_date >= ?)`, end, start);
-      for (const e of payees) {
-        const lop = rand() < 0.08 ? between(1, 2) : 0;
-        const slip = computePayslip(e.annual_ctc, wd, wd - lop);
-        insert('payslips', { run_id: runId, employee_id: e.id, month, working_days: wd, paid_days: wd - lop, lop_days: lop, ...slip });
-        g += slip.gross; dd += slip.total_deductions; n += slip.net;
+      for (const companyId of [mainCo, digitalCo]) {
+        const runId = insert('payroll_runs', { month, company_id: companyId, status: 'paid', processed_by: hr, processed_at: `${end} 10:00:00`, paid_at: `${end} 18:00:00` });
+        let g = 0, dd = 0, n = 0;
+        const payees = all(`SELECT * FROM employees WHERE annual_ctc > 0 AND company_id = ? AND date_of_joining <= ? AND (status != 'exited' OR exit_date >= ?)`, companyId, end, start);
+        for (const e of payees) {
+          const lop = rand() < 0.08 ? between(1, 2) : 0;
+          const slip = computePayslip(e.annual_ctc, wd, wd - lop);
+          insert('payslips', { run_id: runId, employee_id: e.id, company_id: companyId, month, working_days: wd, paid_days: wd - lop, lop_days: lop, tax_regime: 'new', ...slip });
+          g += slip.gross; dd += slip.total_deductions; n += slip.net;
+        }
+        run('UPDATE payroll_runs SET employees = ?, total_gross = ?, total_deductions = ?, total_net = ? WHERE id = ?', payees.length, Math.round(g), Math.round(dd), Math.round(n), runId);
       }
-      run('UPDATE payroll_runs SET employees = ?, total_gross = ?, total_deductions = ?, total_net = ? WHERE id = ?', payees.length, Math.round(g), Math.round(dd), Math.round(n), runId);
     }
     const fy = today.getMonth() >= 3 ? `${year}-${String(year + 1).slice(2)}` : `${year - 1}-${String(year).slice(2)}`;
     insert('tax_declarations', { employee_id: emp, fy, section: '80C', description: 'PPF & ELSS investments', amount: 150000, status: 'approved', approver_id: hr });
@@ -443,10 +450,155 @@ export function seed({ reset = true } = {}) {
     ];
     for (const [title, category, content] of policies) {
       const docId = insert('documents', { title, category, content, employee_id: null });
-      seedFile('documents', docId, `${title.replace(/[^a-z0-9]+/gi, '-')}.pdf`, makePdf(title, [settings.company_name, '', ...content.match(/.{1,85}(\s|$)/g).map((l) => l.trim())]), hr);
+      seedFile('documents', docId, `${title.replace(/[^a-z0-9]+/gi, '-')}.pdf`,
+        buildPdf({ title, company: settings.company_name, address: settings.company_address, body: `${content}\n\nEffective from 1 April ${year}. Questions? Contact ${settings.company_email}.`, footer: `${settings.company_name} · Confidential` }), hr);
     }
     insert('documents', { title: 'Offer Letter', category: 'Personal', content: 'Offer letter for Software Engineer role.', employee_id: emp });
     insert('documents', { title: 'Appraisal Letter FY25', category: 'Personal', content: 'Revised compensation effective April.', employee_id: emp });
+
+    // ---------- exits: resignations for people already serving notice, one pending, an exit interview, an F&F draft ----------
+    for (const e of all("SELECT * FROM employees WHERE status = 'on_notice'")) {
+      const submitted = ymd(addDays(new Date(`${e.exit_date}T00:00:00`), -60));
+      const rid = insert('resignations', { employee_id: e.id, reason: pick(['Better opportunity', 'Higher studies', 'Relocation', 'Personal reasons']), submitted_on: submitted, requested_lwd: e.exit_date, approved_lwd: e.exit_date, notice_days: 60, status: 'approved', approver_id: hr });
+      insert('approval_steps', { entity: 'resignations', entity_id: rid, level: 'manager', approver_id: e.manager_id, decision: 'approved' });
+      insert('approval_steps', { entity: 'resignations', entity_id: rid, level: 'hr', approver_id: hr, decision: 'approved' });
+    }
+    const leaver = team.find((e) => e.id !== emp && e.status === 'active');
+    if (leaver) {
+      insert('resignations', { employee_id: leaver.id, reason: 'Better opportunity', notes: 'Grateful for the learning here.', submitted_on: ymd(addDays(today, -2)), requested_lwd: ymd(addDays(today, 58)), notice_days: 60, status: 'pending' });
+    }
+    // A past leaver with a completed exit interview and a settled F&F, for exit analytics.
+    const formers = all("SELECT * FROM employees WHERE status = 'exited'");
+    formers.forEach((f, i) => {
+      const rid = insert('resignations', { employee_id: f.id, reason: pick(['Better opportunity', 'Compensation', 'Relocation']), submitted_on: ymd(addDays(new Date(`${f.exit_date}T00:00:00`), -60)), requested_lwd: f.exit_date, approved_lwd: f.exit_date, notice_days: 60, status: 'approved', approver_id: hr });
+      insert('exit_interviews', { employee_id: f.id, resignation_id: rid, primary_reason: pick(['Career growth', 'Compensation', 'Relocation', 'Manager relationship']), rating_manager: between(2, 5), rating_culture: between(3, 5), rating_growth: between(2, 4), rating_compensation: between(2, 4), would_recommend: rand() < 0.7 ? 1 : 0, would_return: rand() < 0.5 ? 1 : 0, feedback: 'Good team, but limited growth path in my role.' });
+      const gross = f.annual_ctc / 12;
+      insert('fnf_settlements', { employee_id: f.id, resignation_id: rid, last_working_day: f.exit_date, salary_days: 12, salary_amount: Math.round((gross / 30) * 12), leave_encash_days: 6, leave_encash_amount: Math.round((gross * 0.5) / 26 * 6), gratuity: 0, bonus: 0, notice_shortfall_days: 0, notice_recovery: 0, loan_recovery: 0, other_deductions: 0, net_payable: Math.round((gross / 30) * 12 + (gross * 0.5) / 26 * 6), status: i === 0 ? 'paid' : 'approved', created_by: hr, paid_at: i === 0 ? `${f.exit_date} 12:00:00` : null });
+    });
+
+    // ---------- attendance requests, roster ----------
+    const peer = team.find((e) => e.id !== emp && e.id !== leaver?.id) || team[0];
+    insert('attendance_requests', { employee_id: peer.id, type: 'wfh', date: ymd(addDays(today, 3)), end_date: ymd(addDays(today, 4)), reason: 'Home internet installation', status: 'pending' });
+    let lastWeekend = addDays(today, -1);
+    while (!isWeekend(lastWeekend)) lastWeekend = addDays(lastWeekend, -1);
+    run(`INSERT OR IGNORE INTO attendance (employee_id, date, clock_in, clock_out, status, work_mode) VALUES (?, ?, '10:00', '15:30', 'present', 'office')`, emp, ymd(lastWeekend));
+    insert('attendance_requests', { employee_id: emp, type: 'overtime', date: ymd(addDays(today, -3)), hours: 2, reason: 'Production release support', status: 'approved', approver_id: engMgr });
+    const csTeam = emps.filter((e) => e.dept === 'Customer Success');
+    const shiftIds = all('SELECT id FROM shifts ORDER BY start_time').map((r) => r.id);
+    let monday = new Date(today);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    csTeam.forEach((e, i) => {
+      for (let d = 0; d < 7; d++) {
+        const date = ymd(addDays(monday, d));
+        if (d >= 5) insert('shift_roster', { employee_id: e.id, date, shift_id: null, week_off: 1 });
+        else insert('shift_roster', { employee_id: e.id, date, shift_id: shiftIds[(i + d) % shiftIds.length], week_off: 0 });
+      }
+    });
+
+    // ---------- loans & travel ----------
+    const loanId = insert('loans', { employee_id: emp, type: 'loan', amount: 120000, tenure_months: 12, emi: 10000, outstanding: 90000, reason: 'Home renovation', status: 'approved', approver_id: hr, disbursed_on: ymd(addDays(today, -95)) });
+    for (let i = 3; i >= 1; i--) {
+      const md = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      insert('loan_repayments', { loan_id: loanId, month: `${md.getFullYear()}-${pad(md.getMonth() + 1)}`, amount: 10000 });
+    }
+    insert('loans', { employee_id: peer.id, type: 'advance', amount: 30000, tenure_months: 2, emi: 15000, outstanding: 30000, reason: 'Medical emergency', status: 'pending' });
+    insert('travel_requests', { employee_id: peer.id, purpose: 'Client workshop with ShopKart', from_city: 'Bengaluru', to_city: 'Mumbai', depart_date: ymd(addDays(today, 9)), return_date: ymd(addDays(today, 11)), mode: 'Flight', estimated_cost: 42000, advance_amount: 10000, billable: 1, status: 'pending' });
+    insert('travel_requests', { employee_id: engMgr, purpose: 'Quarterly leadership offsite', from_city: 'Bengaluru', to_city: 'Pune', depart_date: ymd(addDays(today, 16)), return_date: ymd(addDays(today, 17)), mode: 'Flight', estimated_cost: 28000, advance_amount: 0, status: 'approved', approver_id: hr });
+
+    // ---------- tasks ----------
+    const taskSpecs = ['Write API docs for payouts', 'Fix flaky reconciliation test', 'Design review: onboarding flow', 'Upgrade Node runtime', 'Prepare sprint demo',
+      'Customer escalation follow-up', 'Update runbook for on-call', 'Load-test settlement service', 'Refactor auth middleware', 'Accessibility audit of dashboard'];
+    taskSpecs.forEach((title, i) => {
+      const assignee = i < 4 ? emp : pick(team).id;
+      const status = ['todo', 'in_progress', 'review', 'done'][i % 4];
+      insert('tasks', { title, project_id: pick(projects), assignee_id: assignee, created_by: engMgr, priority: pick(['low', 'medium', 'high', 'urgent']), status, due_date: ymd(addDays(today, between(-3, 14))), estimate_hours: between(2, 16), completed_at: status === 'done' ? `${todayStr} 10:00:00` : null });
+    });
+
+    // ---------- letters, acknowledgements, custom fields, knowledge base ----------
+    const LETTERS = [
+      ['Offer Letter', 'offer', 'Date: {{today}}\n\nDear {{candidate_name}},\n\nWe are pleased to offer you the position of {{job_title}} at {{company_name}}. Your annual cost to company will be {{offered_ctc}}, and your expected date of joining is {{joining_date}}.\n\nThis offer is subject to satisfactory background verification and submission of the documents listed in your onboarding checklist. You will be on probation for the first 90 days.\n\nPlease sign and return a copy of this letter to confirm your acceptance.\n\nWe look forward to welcoming you to the team.\n\nWarm regards,\nPeople Team\n{{company_name}}'],
+      ['Experience Letter', 'experience', 'Date: {{today}}\n\nTO WHOMSOEVER IT MAY CONCERN\n\nThis is to certify that {{employee_name}} (Employee ID {{emp_code}}) worked with {{company_name}} as {{designation}} in the {{department}} department from {{date_of_joining}} to {{last_working_day}}.\n\nDuring this period we found {{first_name}} to be diligent, reliable and a valued member of the team. We wish {{first_name}} every success in future endeavours.\n\nFor {{company_name}}\nAuthorised Signatory'],
+      ['Relieving Letter', 'relieving', 'Date: {{today}}\n\nDear {{employee_name}},\n\nThis is to confirm that your resignation has been accepted and you are relieved from your duties as {{designation}} with effect from the close of business on {{last_working_day}}.\n\nYour full and final settlement will be processed as per company policy. We thank you for your contributions and wish you the very best.\n\nFor {{company_name}}\nHuman Resources'],
+      ['Salary Certificate', 'salary', 'Date: {{today}}\n\nTO WHOMSOEVER IT MAY CONCERN\n\nThis is to certify that {{employee_name}} (Employee ID {{emp_code}}) is employed with {{company_name}} as {{designation}} since {{date_of_joining}}. The current annual cost to company is {{annual_ctc}} (gross monthly salary {{monthly_gross}}).\n\nThis certificate is issued on the employee\'s request for the purpose of {{purpose}}.\n\nFor {{company_name}}\nAuthorised Signatory'],
+      ['Address Proof Letter', 'address', 'Date: {{today}}\n\nTO WHOMSOEVER IT MAY CONCERN\n\nThis is to certify that {{employee_name}} is a permanent employee of {{company_name}}, working as {{designation}} since {{date_of_joining}}, at our office at {{company_address}}.\n\nThis letter is issued for the purpose of {{purpose}}.\n\nFor {{company_name}}\nHuman Resources'],
+      ['Confirmation Letter', 'confirmation', 'Date: {{today}}\n\nDear {{employee_name}},\n\nWe are pleased to inform you that you have successfully completed your probation period, and your employment as {{designation}} with {{company_name}} is confirmed with effect from {{probation_end_date}}.\n\nAll other terms of your appointment remain unchanged. Congratulations, and thank you for your contributions so far.\n\nFor {{company_name}}\nHuman Resources'],
+    ];
+    for (const [name, type, body] of LETTERS) insert('letter_templates', { name, type, body });
+    insert('letter_requests', { employee_id: emp, type: 'Salary Certificate', purpose: 'Home loan application', status: 'pending' });
+    run("UPDATE documents SET requires_ack = 1 WHERE title IN ('Employee Handbook', 'POSH Policy') AND employee_id IS NULL");
+    const handbook = get("SELECT id FROM documents WHERE title = 'Employee Handbook'");
+    for (const e of emps.filter((x) => x.id !== emp).slice(0, 22)) run('INSERT OR IGNORE INTO document_acks (document_id, employee_id) VALUES (?, ?)', handbook.id, e.id);
+    [['T-shirt size', 'select', JSON.stringify(['XS', 'S', 'M', 'L', 'XL', 'XXL']), 'Personal', 0, 1], ['LinkedIn profile', 'text', null, 'Personal', 0, 1],
+      ["Father's name", 'text', null, 'Family', 0, 0], ['Passport number', 'text', null, 'Identity', 0, 0], ['Passport expiry', 'date', null, 'Identity', 0, 0]]
+      .forEach(([label, type, options, section, required, editable], i) => insert('custom_fields', { label, field_key: label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_$/, ''), type, options, section, required, employee_editable: editable, sort_order: i }));
+    const tshirt = get("SELECT id FROM custom_fields WHERE field_key = 't_shirt_size'").id;
+    for (const e of emps.slice(0, 25)) run('INSERT INTO custom_field_values (employee_id, field_id, value) VALUES (?, ?, ?)', e.id, tshirt, pick(['S', 'M', 'L', 'XL']));
+    [['How do I apply for leave?', 'Leave', 'Go to Leave → Apply leave, pick the leave type and dates. Weekends and holidays are excluded automatically. Your manager is notified instantly and you get an email once it is approved.'],
+      ['When is salary credited?', 'Payroll', 'Salary is credited on the last working day of the month. Your payslip appears under Payslips & Tax once payroll is marked paid, and you receive an email.'],
+      ['How do I claim reimbursements?', 'Expenses', 'Submit a claim under Expenses with a photo or PDF of the bill. Approved claims are paid with your next salary and shown on the payslip as a reimbursement.'],
+      ['How do I choose between the old and new tax regime?', 'Payroll', 'Open Payslips & Tax → Tax planner. It compares both regimes using your declarations and recommends the cheaper one. You can switch before the next payroll run.'],
+      ['How do I request an experience or salary certificate?', 'Documents', 'Go to Documents → Request a letter. HR generates it from an approved template and you receive the PDF by email and under My documents.'],
+      ['What is the notice period?', 'Exit', 'The standard notice period is 60 days. Submit your resignation under Exit; your manager and then HR approve it and your last working day is confirmed.']]
+      .forEach(([title, category, body]) => insert('kb_articles', { title, category, body, created_by: hr, views: between(5, 120), helpful: between(1, 40) }));
+
+    // ---------- feedback, 1:1s, social feed, eNPS ----------
+    const fbMsgs = ['Your code reviews are thorough and kind — the team levels up because of them.', 'Great ownership of the incident last week; the postmortem was crisp.',
+      'Consider sharing progress earlier so blockers surface sooner.', 'The client demo was polished and well-paced.', 'Thanks for mentoring the interns so patiently.'];
+    fbMsgs.forEach((message, i) => insert('feedback', { from_id: i === 2 ? engMgr : pick(team).id, to_id: emp, message, visibility: i === 2 ? 'recipient' : pick(['recipient', 'public']), competency: pick(['Collaboration', 'Ownership', 'Communication', 'Craft']), created_at: `${ymd(addDays(today, -i * 3))} 11:00:00` }));
+    insert('feedback_requests', { requester_id: peer.id, subject_id: peer.id, reviewer_id: emp, question: 'How did I do leading the payments migration?', status: 'pending' });
+    insert('one_on_ones', { manager_id: engMgr, employee_id: emp, scheduled_at: `${ymd(addDays(today, 2))}T16:00`, duration_mins: 30, agenda: 'Career goals for H2\nFeedback on the migration project', status: 'scheduled', created_by: engMgr });
+    insert('one_on_ones', { manager_id: engMgr, employee_id: emp, scheduled_at: `${ymd(addDays(today, -12))}T16:00`, duration_mins: 30, agenda: 'Sprint retro', notes: 'Discussed workload and on-call rotation.', action_items: 'Rohan: rebalance on-call\nAnanya: draft design doc for reconciliation', status: 'completed', created_by: engMgr });
+    const postTexts = ['Shipped the new payments reconciliation service to production today 🚀 Huge thanks to the whole platform team!', 'Reminder: Diwali potluck in the cafeteria on Friday. Bring your favourite sweets! 🪔',
+      'We just crossed 1,000 customers on the Retail app. Proud of this team! 🎉', 'Looking for volunteers for the charity drive next month — comment below if you are in.'];
+    postTexts.forEach((body, i) => {
+      const pid = insert('posts', { author_id: [engMgr, hr, heads.Sales, hr][i], body, created_at: `${ymd(addDays(today, -i * 2))} 10:30:00` });
+      for (const e of emps.slice(i, i + between(4, 15))) run('INSERT OR IGNORE INTO post_likes (post_id, employee_id) VALUES (?, ?)', pid, e.id);
+      insert('post_comments', { post_id: pid, author_id: pick(emps).id, body: pick(['Congrats team! 👏', 'Count me in!', 'Amazing work 🙌', 'So proud of this!']) });
+    });
+    const enps = insert('surveys', { question: 'How likely are you to recommend Nimbus as a place to work? (0–10)', options: JSON.stringify(Array.from({ length: 11 }, (_, i) => String(i))), active: 1, type: 'enps' });
+    for (const e of emps.slice(3, 30)) run('INSERT OR IGNORE INTO survey_votes (survey_id, employee_id, option_index) VALUES (?, ?, ?)', enps, e.id, pick([6, 7, 8, 8, 9, 9, 9, 10, 10, 5]));
+
+    // ---------- activity monitoring: rules, devices, raw timeline for the last 3 working days ----------
+    const RULES = [['code', 'productive'], ['vs code', 'productive'], ['github.com', 'productive'], ['terminal', 'productive'], ['jira', 'productive'], ['atlassian.net', 'productive'],
+      ['confluence', 'productive'], ['figma', 'productive'], ['figma.com', 'productive'], ['salesforce', 'productive'], ['docs.google.com', 'productive'], ['sheets.google.com', 'productive'],
+      ['google sheets', 'productive'], ['google docs', 'productive'], ['gmail', 'productive'], ['mail.google.com', 'productive'], ['zoom', 'productive'], ['miro', 'productive'], ['adobe illustrator', 'productive'],
+      ['slack', 'neutral'], ['google meet', 'neutral'], ['whatsapp web', 'neutral'], ['linkedin.com', 'neutral'], ['linkedin', 'neutral'],
+      ['youtube.com', 'unproductive'], ['youtube', 'unproductive'], ['instagram.com', 'unproductive'], ['instagram', 'unproductive'], ['netflix.com', 'unproductive'], ['facebook.com', 'unproductive'], ['news sites', 'unproductive'], ['x.com', 'unproductive']];
+    for (const [pattern, category] of RULES) insert('app_rules', { pattern, category, department_id: null });
+    insert('app_rules', { pattern: 'linkedin.com', category: 'productive', department_id: dept.Sales });
+    insert('app_rules', { pattern: 'linkedin', category: 'productive', department_id: dept['Human Resources'] });
+    const classify = classifier();
+    const evStmt = db.prepare('INSERT INTO activity_events (employee_id, device_id, ts, app, domain, title, category, active_seconds, idle_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const trackedDays = [];
+    for (let back = 0; trackedDays.length < 3 && back < 10; back++) { const d = addDays(today, -back); if (!isWeekend(d) && !holidaySet.has(ymd(d))) trackedDays.push(ymd(d)); }
+    const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
+    const tracked = emps.filter((e) => e.id !== ceo).slice(0, 28);
+    for (const e of tracked) {
+      const deviceId = insert('agent_devices', { employee_id: e.id, name: `${e.first_name}'s laptop`, platform: pick(['Windows 11', 'macOS 15', 'Ubuntu 24.04']), token_hash: crypto.createHash('sha256').update(`seed-${e.id}`).digest('hex'), last_seen_at: `${todayStr} 12:00:00` });
+      const apps = (APPS[e.dept] || APPS.default);
+      for (const date of trackedDays) {
+        const att = get('SELECT clock_in, clock_out FROM attendance WHERE employee_id = ? AND date = ? AND clock_in IS NOT NULL', e.id, date);
+        if (!att) continue;
+        const [h1, m1] = att.clock_in.split(':').map(Number);
+        const startM = h1 * 60 + m1;
+        const endM = att.clock_out ? Number(att.clock_out.slice(0, 2)) * 60 + Number(att.clock_out.slice(3, 5)) : date === todayStr ? Math.min(nowMins, startM + 540) : startM + 510;
+        const lunch = startM + 240;
+        for (let t = startM; t < endM; t += 5) {
+          if (t >= lunch && t < lunch + 40) continue; // lunch break: agent offline
+          const [appName, cat] = rand() < 0.08 ? pick(apps.filter((a) => a[1] === 'unproductive')) || pick(apps) : pick(apps.filter((a) => a[1] !== 'unproductive'));
+          const domain = { GitHub: 'github.com', Jira: 'atlassian.net', YouTube: 'youtube.com', LinkedIn: 'linkedin.com', Instagram: 'instagram.com', Figma: 'figma.com', Gmail: 'mail.google.com', 'Google Sheets': 'sheets.google.com', 'Google Docs': 'docs.google.com' }[appName] || null;
+          const idle = rand() < 0.1 ? between(60, 300) : between(0, 40);
+          const active = 300 - idle;
+          evStmt.run(e.id, deviceId, `${date} ${pad(Math.floor(t / 60))}:${pad(t % 60)}:00`, appName, domain, `${appName} — work`, classify(appName, domain, e.department_id), active, idle);
+        }
+        rollupDay(e.id, date);
+        evaluateAlerts(e.id, date);
+      }
+    }
+    // A few representative alerts for the demo (managers see them on the productivity dashboard).
+    for (const [e, type, severity, message] of [[team[1], 'overwork', 'high', '10.8 h of active time — burnout risk'], [team[2], 'long_idle', 'low', 'Idle for 48 min at a stretch'], [tracked[5], 'unproductive', 'medium', '74 min on unproductive apps/sites']]) {
+      if (e) run('INSERT OR IGNORE INTO activity_alerts (employee_id, type, severity, message, date) VALUES (?, ?, ?, ?, ?)', e.id, type, severity, message, trackedDays[1] || todayStr);
+    }
 
     // ---------- notifications ----------
     for (const [id, title, body, link] of [

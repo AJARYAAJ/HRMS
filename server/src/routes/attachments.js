@@ -29,6 +29,11 @@ const RULES = {
     read: (r, u) => u.role !== 'employee',
     write: (r, u) => u.role !== 'employee',
   },
+  screenshots: {
+    load: (id) => get('SELECT id, id AS owner FROM employees WHERE id = ?', id),
+    read: (r, u) => r.owner === u.id || canManage(u, r.owner),
+    write: () => false,
+  },
   documents: {
     load: (id) => get('SELECT id, employee_id AS owner FROM documents WHERE id = ?', id),
     read: (r, u) => r.owner === null || r.owner === u.id || isHR(u),

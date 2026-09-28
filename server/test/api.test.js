@@ -106,11 +106,15 @@ test('managers only see their own team in scoped data', async () => {
 test('payroll run computes payslips and locks once paid', async () => {
   const d = new Date();
   const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  const run = await call('hr', 'POST', 'payroll/run', { month });
-  assert.equal(run.status, 201);
-  assert.ok(run.body.employees > 30);
-  assert.ok(run.body.total_net > 0 && run.body.total_net < run.body.total_gross);
-  assert.equal((await call('hr', 'POST', `payroll/runs/${run.body.id}/pay`)).status, 200);
+  const res = await call('hr', 'POST', 'payroll/run', { month });
+  assert.equal(res.status, 201);
+  // One run per legal entity; together they cover every salaried employee.
+  assert.ok(res.body.runs.length >= 1);
+  assert.ok(res.body.runs.reduce((a, r) => a + r.employees, 0) > 30);
+  for (const r of res.body.runs) {
+    assert.ok(r.total_net > 0 && r.total_net < r.total_gross);
+    assert.equal((await call('hr', 'POST', `payroll/runs/${r.id}/pay`)).status, 200);
+  }
   assert.equal((await call('hr', 'POST', 'payroll/run', { month })).status, 400);
   const future = await call('hr', 'POST', 'payroll/run', { month: '2099-01' });
   assert.equal(future.status, 400);

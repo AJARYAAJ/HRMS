@@ -10,7 +10,14 @@ import { emailsRouter } from './routes/emails.js';
 import {
   attendanceRouter, leaveRouter, regularizationsRouter, shiftsRouter, holidaysRouter,
 } from './routes/attendance.js';
-import { payrollRouter, taxRouter } from './routes/payroll.js';
+import { payrollRouter, taxRouter, loansRouter } from './routes/payroll.js';
+import { exitRouter, resignationsRouter } from './routes/exit.js';
+import { workforceRouter, attendanceRequestsRouter } from './routes/workforce.js';
+import { peopleRouter } from './routes/people.js';
+import { careersRouter, offersRouter } from './routes/careers.js';
+import { workRouter, travelRouter } from './routes/work.js';
+import { agentRouter, activityRouter } from './routes/activity.js';
+import { hrdocsRouter, lettersRouter, letterRequestsRouter, customFieldsRouter, kbRouter } from './routes/hrdocs.js';
 import * as m from './routes/modules.js';
 import { dashboardRouter, reportsRouter, productivityRouter, searchRouter, approvalsRouter } from './routes/insights.js';
 
@@ -18,6 +25,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createApp() {
   const app = express();
+  if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY);
   app.use(cors());
   app.use(express.json({ limit: '2mb' }));
 
@@ -26,6 +34,8 @@ export function createApp() {
   api.post('/auth/login', loginHandler);
   api.post('/auth/forgot-password', forgotPasswordHandler);
   api.post('/auth/reset-password', resetPasswordHandler);
+  api.use('/careers', careersRouter); // public careers site
+  api.use('/agent', agentRouter); // desktop activity agent (device-token auth)
   api.use(authenticate);
   api.use('/auth', authRouter);
   api.use('/employees', employeesRouter);
@@ -65,6 +75,22 @@ export function createApp() {
   api.use('/search', searchRouter);
   api.use('/approvals', approvalsRouter);
   api.use('/attachments', attachmentsRouter);
+  api.use('/companies', m.companiesRouter);
+  api.use('/loans', loansRouter);
+  api.use('/resignations', resignationsRouter);
+  api.use('/exit', exitRouter);
+  api.use('/attendance-requests', attendanceRequestsRouter);
+  api.use('/workforce', workforceRouter);
+  api.use('/letter-templates', lettersRouter);
+  api.use('/letter-requests', letterRequestsRouter);
+  api.use('/custom-fields', customFieldsRouter);
+  api.use('/kb', kbRouter);
+  api.use('/hr', hrdocsRouter);
+  api.use('/people', peopleRouter);
+  api.use('/offers', offersRouter);
+  api.use('/work', workRouter);
+  api.use('/travel', travelRouter);
+  api.use('/activity', activityRouter);
   api.use('/emails', emailsRouter);
   api.use((req, res) => res.status(404).json({ error: 'Not found' }));
   app.use('/api', api);

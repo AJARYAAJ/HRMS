@@ -19,8 +19,16 @@ export const minutes = (t) => {
   return h * 60 + m;
 };
 
-export function holidaySet() {
-  return new Set(all('SELECT date FROM holidays').map((h) => h.date));
+/**
+ * Company holidays that are days off. Public holidays apply to everyone; optional (restricted) holidays
+ * only apply to an employee who opted in to them.
+ */
+export function holidaySet(employeeId) {
+  const rows = employeeId
+    ? all(`SELECT date FROM holidays WHERE type != 'Optional'
+           UNION SELECT h.date FROM holidays h JOIN optional_holiday_choices c ON c.holiday_id = h.id WHERE c.employee_id = ?`, employeeId)
+    : all("SELECT date FROM holidays WHERE type != 'Optional'");
+  return new Set(rows.map((h) => h.date));
 }
 
 /** Working days between two dates inclusive, excluding weekends and holidays. */
@@ -57,19 +65,23 @@ export function annualTaxNewRegime(annualGross) {
   return round2(tax * 1.04);
 }
 
-/** Salary breakup and statutory deductions for one month. */
-export function computePayslip(annualCtc, workingDays, paidDays) {
+/**
+ * Salary breakup and statutory deductions for one month.
+ * opts: basicPct / hraPct (salary structure) and annualTax (from the employee's chosen regime; defaults to new regime).
+ */
+export function computePayslip(annualCtc, workingDays, paidDays, opts = {}) {
+  const { basicPct = 50, hraPct = 40 } = opts;
   const monthlyCtc = annualCtc / 12;
   const factor = workingDays ? paidDays / workingDays : 1;
-  const fullBasic = monthlyCtc * 0.5;
+  const fullBasic = monthlyCtc * (basicPct / 100);
   const basic = round2(fullBasic * factor);
-  const hra = round2(fullBasic * 0.4 * factor);
+  const hra = round2(fullBasic * (hraPct / 100) * factor);
   const gross = round2(monthlyCtc * factor);
   const special = round2(gross - basic - hra);
   const pf = round2(Math.min(basic, 15000) * 0.12);
   const esi = gross <= 21000 ? round2(gross * 0.0075) : 0;
   const pt = gross > 15000 ? 200 : gross > 10000 ? 150 : 0;
-  const tds = round2(annualTaxNewRegime(annualCtc) / 12);
+  const tds = round2((opts.annualTax ?? annualTaxNewRegime(annualCtc)) / 12);
   const total_deductions = round2(pf + esi + pt + tds);
   return { basic, hra, special, gross, pf, esi, pt, tds, total_deductions, net: round2(gross - total_deductions) };
 }

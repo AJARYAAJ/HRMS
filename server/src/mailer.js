@@ -1,4 +1,6 @@
 import nodemailer from 'nodemailer';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { all, get, insert, run } from './db.js';
 
 /**
@@ -10,6 +12,8 @@ import { all, get, insert, run } from './db.js';
  */
 
 const MAX_ATTEMPTS = 4;
+// Mirrors uploads.js (not imported to avoid a circular dependency).
+const uploadDir = () => process.env.UPLOAD_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data', 'uploads');
 let transport;
 let transportKey;
 
@@ -75,10 +79,17 @@ export function renderEmail({ heading, greeting, paragraphs = [], details = [], 
 }
 
 /** Queue an email for delivery. Returns the outbox id. */
-export function queueEmail({ to, toName, employeeId, subject, template = 'generic', ...content }) {
+/**
+ * Queue an email for delivery. Returns the outbox id.
+ * attachments: [{ filename, storedName }] referring to files in the upload store (sent as real MIME attachments).
+ */
+export function queueEmail({ to, toName, employeeId, subject, template = 'generic', attachments, ...content }) {
   if (!to) return null;
   const { html, text } = content.html ? { html: content.html, text: content.text } : renderEmail(content);
-  return insert('email_outbox', { to_email: to, to_name: toName, employee_id: employeeId, subject, html, text, template });
+  return insert('email_outbox', {
+    to_email: to, to_name: toName, employee_id: employeeId, subject, html, text, template,
+    attachments: attachments?.length ? JSON.stringify(attachments.map((a) => ({ filename: a.filename, storedName: path.basename(a.storedName) }))) : null,
+  });
 }
 
 /** Queue a notification email to an employee, honouring their email preference. */
@@ -115,6 +126,7 @@ export async function processOutbox(limit = 25) {
           subject: mail.subject,
           html: mail.html,
           text: mail.text || undefined,
+          attachments: mail.attachments ? JSON.parse(mail.attachments).map((a) => ({ filename: a.filename, path: path.join(uploadDir(), a.storedName) })) : undefined,
         });
         run("UPDATE email_outbox SET status = 'sent', attempts = attempts + 1, message_id = ?, last_error = NULL, sent_at = datetime('now') WHERE id = ?",
           info.messageId || null, mail.id);

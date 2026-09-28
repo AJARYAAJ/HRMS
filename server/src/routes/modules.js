@@ -17,6 +17,16 @@ export const departmentsRouter = crud({
            (SELECT COUNT(*) FROM employees e WHERE e.department_id = t.id AND e.status != 'exited') AS headcount
            FROM departments t LEFT JOIN employees h ON h.id = t.head_id`,
 });
+export const companiesRouter = crud({
+  table: 'companies', label: 'company', readAll: true, order: 't.name',
+  fields: ['name', 'legal_name', 'pan', 'tan', 'gstin', 'pf_code', 'esi_code', 'address', 'city', 'state'],
+  select: `SELECT t.*, (SELECT COUNT(*) FROM employees e WHERE e.company_id = t.id AND e.status != 'exited') AS headcount FROM companies t`,
+  validate(data, user, existing) {
+    if (!existing && !data.name) throw httpError(400, 'Company name is required');
+    return data;
+  },
+});
+
 export const designationsRouter = crud({
   table: 'designations', label: 'designation', fields: ['title', 'level'], readAll: true, order: 't.title',
   select: `SELECT t.*, (SELECT COUNT(*) FROM employees e WHERE e.designation_id = t.id AND e.status != 'exited') AS headcount FROM designations t`,
@@ -334,14 +344,24 @@ const DOC_SELECT = `SELECT d.*, ${EMP_NAME('e')} AS employee_name,
   LEFT JOIN attachments f ON f.id = (SELECT MAX(id) FROM attachments WHERE entity = 'documents' AND entity_id = d.id)`;
 documentsRouter.get('/', (req, res) => {
   const personal = isHR(req.user) && req.query.employee_id ? Number(req.query.employee_id) : req.user.id;
-  res.json(all(
+  const rows = all(
     `${DOC_SELECT} WHERE d.employee_id IS NULL OR d.employee_id = ? ${isHR(req.user) && req.query.all ? 'OR 1=1' : ''} ORDER BY d.employee_id IS NOT NULL, d.id DESC`,
     personal,
-  ));
+  );
+  const mine = new Set(all('SELECT document_id FROM document_acks WHERE employee_id = ?', req.user.id).map((r) => r.document_id));
+  const counts = isHR(req.user)
+    ? Object.fromEntries(all('SELECT document_id, COUNT(*) AS n FROM document_acks GROUP BY document_id').map((r) => [r.document_id, r.n]))
+    : {};
+  const headcount = isHR(req.user) ? get("SELECT COUNT(*) AS n FROM employees WHERE status != 'exited'").n : null;
+  res.json(rows.map((d) => ({
+    ...d, acknowledged: mine.has(d.id),
+    ...(isHR(req.user) && d.requires_ack ? { ack_count: counts[d.id] || 0, ack_total: d.employee_id ? 1 : headcount } : {}),
+  })));
 });
 // HR publishes company-wide or personal documents; employees may upload their own personal documents (KYC, certificates).
 documentsRouter.post('/', singleFile(false), (req, res) => {
   const { title, category, content } = req.body;
+  const requiresAck = isHR(req.user) && ['1', 'true', 'on'].includes(String(req.body.requires_ack)) ? 1 : 0;
   const hr = isHR(req.user);
   const employeeId = hr ? (req.body.employee_id ? Number(req.body.employee_id) : null) : req.user.id;
   if (!title) {
@@ -352,7 +372,7 @@ documentsRouter.post('/', singleFile(false), (req, res) => {
   let id;
   try {
     id = tx(() => {
-      const docId = insert('documents', { title, category: category || (hr ? 'Policy' : 'Personal'), employee_id: employeeId, content: content || null });
+      const docId = insert('documents', { title, category: category || (hr ? 'Policy' : 'Personal'), employee_id: employeeId, content: content || null, requires_ack: requiresAck });
       if (req.file) saveAttachment(req.file, 'documents', docId, req.user.id);
       audit(req.user.id, 'create', 'documents', docId, req.file ? { file: req.file.originalname } : undefined);
       return docId;
@@ -363,6 +383,11 @@ documentsRouter.post('/', singleFile(false), (req, res) => {
     throw err;
   }
   if (hr && employeeId) notify(employeeId, 'New document shared with you', title, '/documents');
+  if (hr && !employeeId && requiresAck) {
+    for (const { id: eid } of all("SELECT id FROM employees WHERE status != 'exited' AND id != ?", req.user.id)) {
+      notify(eid, `Please read and acknowledge: ${title}`, 'A new company policy needs your acknowledgement.', '/documents');
+    }
+  }
   if (!hr) notifyHR('Employee uploaded a document', `${req.user.first_name} ${req.user.last_name}: ${title}`, '/documents');
   res.status(201).json(get(`${DOC_SELECT} WHERE d.id = ?`, id));
 });
@@ -385,18 +410,28 @@ surveysRouter.get('/', (req, res) => {
     const options = JSON.parse(s.options);
     const votes = all('SELECT option_index, COUNT(*) AS n FROM survey_votes WHERE survey_id = ? GROUP BY option_index', s.id);
     const mine = get('SELECT option_index FROM survey_votes WHERE survey_id = ? AND employee_id = ?', s.id, req.user.id);
-    return {
-      ...s, options,
-      counts: options.map((_, i) => votes.find((v) => v.option_index === i)?.n || 0),
-      my_vote: mine ? mine.option_index : null,
-    };
+    const counts = options.map((_, i) => votes.find((v) => v.option_index === i)?.n || 0);
+    const out = { ...s, options, counts, my_vote: mine ? mine.option_index : null };
+    // eNPS: option index = score 0–10; promoters 9–10, detractors 0–6. Individual answers are never exposed.
+    if (s.type === 'enps') {
+      const total = counts.reduce((a, b) => a + b, 0);
+      const promoters = counts.slice(9).reduce((a, b) => a + b, 0);
+      const detractors = counts.slice(0, 7).reduce((a, b) => a + b, 0);
+      out.enps = total ? Math.round(((promoters - detractors) / total) * 100) : null;
+      out.breakdown = { promoters, passives: total - promoters - detractors, detractors, total };
+    }
+    return out;
   }));
 });
 surveysRouter.post('/', requireRole('admin', 'hr'), (req, res) => {
-  const { question, options } = req.body;
-  const opts = (options || []).map((o) => String(o).trim()).filter(Boolean);
+  const { question, options, type = 'poll' } = req.body;
+  if (!['poll', 'enps'].includes(type)) throw httpError(400, 'Survey type must be poll or enps');
+  const opts = type === 'enps' ? Array.from({ length: 11 }, (_, i) => String(i)) : (options || []).map((o) => String(o).trim()).filter(Boolean);
   if (!question || opts.length < 2) throw httpError(400, 'A question and at least two options are required');
-  const id = insert('surveys', { question, options: JSON.stringify(opts), active: 1 });
+  const id = insert('surveys', { question, options: JSON.stringify(opts), active: 1, type });
+  if (type === 'enps') {
+    for (const { id: eid } of all("SELECT id FROM employees WHERE status != 'exited'")) notify(eid, 'Quick pulse survey (anonymous)', question, '/engage?tab=polls', { email: false });
+  }
   res.status(201).json({ id });
 });
 surveysRouter.post('/:id/vote', (req, res) => {

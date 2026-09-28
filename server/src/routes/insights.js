@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { all, get } from '../db.js';
 import { isHR, reportIds, scopeSql, requireRole } from '../auth.js';
 import { today, monthRange, pad, ymd, httpError } from '../utils.js';
+import { approvalFlows, approvalHistory, FLOW_LABELS, saveApprovalFlows } from '../workflow.js';
 
 export const dashboardRouter = Router();
 export const reportsRouter = Router();
@@ -40,38 +41,63 @@ function celebrations(days = 30) {
   return out.sort((x, y) => x.diff - y.diff).slice(0, 12);
 }
 
-function pendingApprovals(user) {
+// Every approvable request type: table, how to summarise it, and which date to sort by.
+const APPROVAL_TYPES = [
+  { type: 'leave', table: 'leave_requests', join: 'JOIN leave_types lt ON lt.id = t.leave_type_id',
+    summary: "lt.name || ' · ' || (CASE WHEN t.days = CAST(t.days AS INTEGER) THEN CAST(t.days AS INTEGER) ELSE t.days END) || ' day(s) · ' || t.start_date || ' → ' || t.end_date", detail: 't.reason' },
+  { type: 'regularization', table: 'regularizations', summary: "'Attendance ' || t.date || ' · ' || t.clock_in || '–' || t.clock_out", detail: 't.reason' },
+  { type: 'attendance_request', table: 'attendance_requests',
+    summary: "(CASE t.type WHEN 'wfh' THEN 'Work from home' WHEN 'on_duty' THEN 'On duty' WHEN 'comp_off' THEN 'Comp-off credit' ELSE 'Overtime' END) || ' · ' || t.date || COALESCE(' → ' || t.end_date, '') || COALESCE(' · ' || t.hours || 'h', '')", detail: 't.reason' },
+  { type: 'expense', table: 'expenses', summary: "t.category || ' · ₹' || t.amount || ' · ' || t.date", detail: 't.description' },
+  { type: 'timesheet', table: 'timesheets', join: 'LEFT JOIN projects p ON p.id = t.project_id', created: 't.date',
+    summary: "COALESCE(p.name, 'General') || ' · ' || t.hours || 'h · ' || t.date", detail: 't.task' },
+  { type: 'travel', table: 'travel_requests', summary: "t.from_city || ' → ' || t.to_city || ' · ' || t.depart_date || COALESCE(' · advance ₹' || NULLIF(t.advance_amount, 0), '')", detail: 't.purpose' },
+  { type: 'loan', table: 'loans', summary: "(CASE t.type WHEN 'advance' THEN 'Salary advance' ELSE 'Loan' END) || ' · ₹' || t.amount || ' · ' || t.tenure_months || ' month(s)'", detail: 't.reason' },
+  { type: 'resignation', table: 'resignations', summary: "'Resignation · requested last day ' || t.requested_lwd", detail: 't.reason' },
+  { type: 'tax', table: 'tax_declarations', summary: "'Sec ' || t.section || ' · ₹' || t.amount || ' · FY ' || t.fy", detail: 't.description' },
+];
+
+export function pendingApprovals(user) {
   if (user.role === 'employee') return [];
-  const scope = isHR(user) ? null : reportIds(user.id);
+  const hr = isHR(user);
+  const scope = hr ? null : reportIds(user.id);
   if (scope && !scope.length) return [];
-  const inScope = (col) => (scope ? `AND ${col} IN (${scope.join(',')})` : '');
-  const notSelf = user.role === 'admin' ? '' : `AND t.employee_id != ${Number(user.id)}`;
-  const q = (type, sql) => all(sql).map((r) => ({ ...r, type }));
-  const items = [
-    ...q('leave', `SELECT t.id, t.employee_id, ${NAME('e')} AS employee_name, e.avatar_color, t.created_at,
-        lt.name || ' · ' || (CASE WHEN t.days = CAST(t.days AS INTEGER) THEN CAST(t.days AS INTEGER) ELSE t.days END) || ' day(s) · ' || t.start_date || ' → ' || t.end_date AS summary, t.reason AS detail
-        FROM leave_requests t JOIN employees e ON e.id = t.employee_id JOIN leave_types lt ON lt.id = t.leave_type_id
-        WHERE t.status = 'pending' ${inScope('t.employee_id')} ${notSelf}`),
-    ...q('regularization', `SELECT t.id, t.employee_id, ${NAME('e')} AS employee_name, e.avatar_color, t.created_at,
-        'Attendance ' || t.date || ' · ' || t.clock_in || '–' || t.clock_out AS summary, t.reason AS detail
-        FROM regularizations t JOIN employees e ON e.id = t.employee_id WHERE t.status = 'pending' ${inScope('t.employee_id')} ${notSelf}`),
-    ...q('expense', `SELECT t.id, t.employee_id, ${NAME('e')} AS employee_name, e.avatar_color, t.created_at,
-        t.category || ' · ₹' || t.amount || ' · ' || t.date AS summary, t.description AS detail
-        FROM expenses t JOIN employees e ON e.id = t.employee_id WHERE t.status = 'pending' ${inScope('t.employee_id')} ${notSelf}`),
-    ...q('timesheet', `SELECT t.id, t.employee_id, ${NAME('e')} AS employee_name, e.avatar_color, t.date AS created_at,
-        COALESCE(p.name, 'General') || ' · ' || t.hours || 'h · ' || t.date AS summary, t.task AS detail
-        FROM timesheets t JOIN employees e ON e.id = t.employee_id LEFT JOIN projects p ON p.id = t.project_id
-        WHERE t.status = 'pending' ${inScope('t.employee_id')} ${notSelf}`),
-  ];
-  if (isHR(user)) {
-    items.push(...q('tax', `SELECT t.id, t.employee_id, ${NAME('e')} AS employee_name, e.avatar_color, t.created_at,
-        'Sec ' || t.section || ' · ₹' || t.amount || ' · FY ' || t.fy AS summary, t.description AS detail
-        FROM tax_declarations t JOIN employees e ON e.id = t.employee_id WHERE t.status = 'pending' ${notSelf}`));
+  const flows = approvalFlows();
+  const items = [];
+  for (const cfg of APPROVAL_TYPES) {
+    const flow = flows[cfg.table] || 'manager';
+    if (!hr && flow === 'hr') continue;
+    // Managers act on fresh requests; HR sees fresh requests plus those a manager has already approved.
+    const statuses = hr ? "('pending','manager_approved')" : "('pending')";
+    const where = [`t.status IN ${statuses}`];
+    if (scope) where.push(`t.employee_id IN (${scope.join(',')})`);
+    if (user.role !== 'admin') where.push(`t.employee_id != ${Number(user.id)}`);
+    items.push(...all(
+      `SELECT t.id, t.employee_id, t.status AS stage, ${NAME('e')} AS employee_name, e.avatar_color, ${cfg.created || 't.created_at'} AS created_at,
+              ${cfg.summary} AS summary, ${cfg.detail} AS detail
+       FROM ${cfg.table} t JOIN employees e ON e.id = t.employee_id ${cfg.join || ''} WHERE ${where.join(' AND ')}`,
+    ).map((r) => ({ ...r, type: cfg.type, flow })));
   }
   return items.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
 }
 
 approvalsRouter.get('/', (req, res) => res.json(pendingApprovals(req.user)));
+
+approvalsRouter.get('/flows', (req, res) => {
+  const flows = approvalFlows();
+  res.json(Object.entries(FLOW_LABELS).map(([key, label]) => ({ key, label, flow: flows[key] })));
+});
+approvalsRouter.put('/flows', requireRole('admin', 'hr'), (req, res) => res.json(saveApprovalFlows(req.body || {})));
+
+// Decision trail for one request (who approved at which level, with comments).
+approvalsRouter.get('/history', (req, res) => {
+  const { entity, id } = req.query;
+  if (!APPROVAL_TYPES.some((t) => t.table === entity)) throw httpError(400, 'Unknown request type');
+  const row = get(`SELECT employee_id FROM ${entity} WHERE id = ?`, Number(id));
+  if (!row) throw httpError(404, 'Request not found');
+  if (row.employee_id !== req.user.id && !isHR(req.user) && !reportIds(req.user.id).includes(row.employee_id)) throw httpError(403, 'Not allowed');
+  res.json(approvalHistory(entity, Number(id)));
+});
 
 dashboardRouter.get('/', (req, res) => {
   const u = req.user;

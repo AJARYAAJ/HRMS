@@ -139,7 +139,8 @@ CREATE TABLE IF NOT EXISTS holidays (
 
 CREATE TABLE IF NOT EXISTS payroll_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  month TEXT NOT NULL UNIQUE,
+  month TEXT NOT NULL,
+  company_id INTEGER,
   status TEXT NOT NULL DEFAULT 'processed',
   employees INTEGER DEFAULT 0,
   total_gross REAL DEFAULT 0,
@@ -147,7 +148,8 @@ CREATE TABLE IF NOT EXISTS payroll_runs (
   total_net REAL DEFAULT 0,
   processed_by INTEGER,
   processed_at TEXT DEFAULT (datetime('now')),
-  paid_at TEXT
+  paid_at TEXT,
+  UNIQUE(month, company_id)
 );
 
 CREATE TABLE IF NOT EXISTS payslips (
@@ -446,6 +448,334 @@ CREATE TABLE IF NOT EXISTS password_resets (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- ---------- legal entities (multi-company groups) ----------
+CREATE TABLE IF NOT EXISTS companies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  legal_name TEXT,
+  pan TEXT, tan TEXT, gstin TEXT,
+  pf_code TEXT, esi_code TEXT,
+  address TEXT,
+  city TEXT,
+  state TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- History of every approval decision (supports multi-level manager → HR flows).
+CREATE TABLE IF NOT EXISTS approval_steps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity TEXT NOT NULL,
+  entity_id INTEGER NOT NULL,
+  level TEXT NOT NULL,
+  approver_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  decision TEXT NOT NULL,
+  comment TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ---------- exit management ----------
+CREATE TABLE IF NOT EXISTS resignations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  reason TEXT NOT NULL,
+  notes TEXT,
+  submitted_on TEXT NOT NULL,
+  requested_lwd TEXT NOT NULL,
+  approved_lwd TEXT,
+  notice_days INTEGER,
+  status TEXT NOT NULL DEFAULT 'pending',
+  approver_id INTEGER,
+  comment TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS exit_interviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  resignation_id INTEGER REFERENCES resignations(id) ON DELETE CASCADE,
+  primary_reason TEXT,
+  rating_manager INTEGER, rating_culture INTEGER, rating_growth INTEGER, rating_compensation INTEGER,
+  would_recommend INTEGER,
+  would_return INTEGER,
+  feedback TEXT,
+  submitted_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(resignation_id)
+);
+
+CREATE TABLE IF NOT EXISTS fnf_settlements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  resignation_id INTEGER REFERENCES resignations(id) ON DELETE SET NULL,
+  last_working_day TEXT NOT NULL,
+  salary_days REAL, salary_amount REAL,
+  leave_encash_days REAL, leave_encash_amount REAL,
+  gratuity REAL, bonus REAL DEFAULT 0,
+  notice_shortfall_days REAL, notice_recovery REAL,
+  loan_recovery REAL, other_deductions REAL DEFAULT 0,
+  net_payable REAL,
+  status TEXT NOT NULL DEFAULT 'draft',
+  notes TEXT,
+  created_by INTEGER,
+  created_at TEXT DEFAULT (datetime('now')),
+  paid_at TEXT
+);
+
+-- ---------- attendance & leave ----------
+CREATE TABLE IF NOT EXISTS attendance_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  date TEXT NOT NULL,
+  end_date TEXT,
+  hours REAL,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  approver_id INTEGER,
+  comment TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS shift_roster (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  shift_id INTEGER REFERENCES shifts(id) ON DELETE CASCADE,
+  week_off INTEGER DEFAULT 0,
+  UNIQUE(employee_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS optional_holiday_choices (
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  holiday_id INTEGER NOT NULL REFERENCES holidays(id) ON DELETE CASCADE,
+  created_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (employee_id, holiday_id)
+);
+
+-- ---------- payroll depth ----------
+CREATE TABLE IF NOT EXISTS loans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  type TEXT NOT NULL DEFAULT 'loan',
+  amount REAL NOT NULL,
+  tenure_months INTEGER NOT NULL,
+  emi REAL NOT NULL,
+  outstanding REAL NOT NULL,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  approver_id INTEGER,
+  comment TEXT,
+  disbursed_on TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS loan_repayments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  loan_id INTEGER NOT NULL REFERENCES loans(id) ON DELETE CASCADE,
+  payslip_id INTEGER REFERENCES payslips(id) ON DELETE CASCADE,
+  month TEXT NOT NULL,
+  amount REAL NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ---------- letters, acknowledgements, custom fields, knowledge base ----------
+CREATE TABLE IF NOT EXISTS letter_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS letter_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  purpose TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  handled_by INTEGER,
+  comment TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS document_acks (
+  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  acknowledged_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (document_id, employee_id)
+);
+
+CREATE TABLE IF NOT EXISTS custom_fields (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  label TEXT NOT NULL,
+  field_key TEXT NOT NULL UNIQUE,
+  type TEXT NOT NULL DEFAULT 'text',
+  options TEXT,
+  section TEXT DEFAULT 'Additional',
+  required INTEGER DEFAULT 0,
+  employee_editable INTEGER DEFAULT 0,
+  sort_order INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS custom_field_values (
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  field_id INTEGER NOT NULL REFERENCES custom_fields(id) ON DELETE CASCADE,
+  value TEXT,
+  PRIMARY KEY (employee_id, field_id)
+);
+
+CREATE TABLE IF NOT EXISTS kb_articles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  category TEXT,
+  body TEXT NOT NULL,
+  views INTEGER DEFAULT 0,
+  helpful INTEGER DEFAULT 0,
+  created_by INTEGER,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ---------- performance & engagement ----------
+CREATE TABLE IF NOT EXISTS feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  from_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  to_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  request_id INTEGER,
+  message TEXT NOT NULL,
+  visibility TEXT NOT NULL DEFAULT 'manager',
+  competency TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS feedback_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  requester_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  subject_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  reviewer_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  question TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS one_on_ones (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  manager_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  scheduled_at TEXT NOT NULL,
+  duration_mins INTEGER DEFAULT 30,
+  agenda TEXT,
+  notes TEXT,
+  action_items TEXT,
+  status TEXT NOT NULL DEFAULT 'scheduled',
+  created_by INTEGER,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS posts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  author_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS post_likes (
+  post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  PRIMARY KEY (post_id, employee_id)
+);
+
+CREATE TABLE IF NOT EXISTS post_comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  author_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ---------- work management ----------
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  description TEXT,
+  project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  assignee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  priority TEXT DEFAULT 'medium',
+  status TEXT NOT NULL DEFAULT 'todo',
+  due_date TEXT,
+  estimate_hours REAL,
+  created_at TEXT DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS travel_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  purpose TEXT NOT NULL,
+  from_city TEXT NOT NULL,
+  to_city TEXT NOT NULL,
+  depart_date TEXT NOT NULL,
+  return_date TEXT,
+  mode TEXT,
+  estimated_cost REAL,
+  advance_amount REAL DEFAULT 0,
+  billable INTEGER DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending',
+  approver_id INTEGER,
+  comment TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ---------- activity monitoring ----------
+CREATE TABLE IF NOT EXISTS agent_devices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  platform TEXT,
+  token_hash TEXT NOT NULL UNIQUE,
+  last_seen_at TEXT,
+  revoked INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- One row per heartbeat (typically each minute): what was in focus and how much of it was active.
+CREATE TABLE IF NOT EXISTS activity_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  device_id INTEGER,
+  ts TEXT NOT NULL,
+  app TEXT,
+  domain TEXT,
+  title TEXT,
+  category TEXT NOT NULL DEFAULT 'neutral',
+  active_seconds INTEGER NOT NULL DEFAULT 0,
+  idle_seconds INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS app_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pattern TEXT NOT NULL,
+  category TEXT NOT NULL,
+  department_id INTEGER REFERENCES departments(id) ON DELETE CASCADE,
+  UNIQUE(pattern, department_id)
+);
+
+CREATE TABLE IF NOT EXISTS activity_alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  severity TEXT DEFAULT 'medium',
+  message TEXT NOT NULL,
+  date TEXT NOT NULL,
+  acknowledged INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(employee_id, type, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_emp_ts ON activity_events(employee_id, ts);
+CREATE INDEX IF NOT EXISTS idx_steps_entity ON approval_steps(entity, entity_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id, status);
 CREATE INDEX IF NOT EXISTS idx_attach_entity ON attachments(entity, entity_id);
 CREATE INDEX IF NOT EXISTS idx_outbox_status ON email_outbox(status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS idx_att_emp_date ON attendance(employee_id, date);

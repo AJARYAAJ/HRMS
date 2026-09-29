@@ -488,4 +488,24 @@ test('desktop agent: reports version/OS/host, idle settings reach the agent, bui
   });
   assert.equal(evilStatus, 400);
   await call('hr', 'PUT', 'activity/settings', { idle_threshold_seconds: 120, away_after_minutes: 60 });
+
+  // Pausing from the tray icon: an event-less status ping marks the person as paused on the live board.
+  assert.equal(cfg.allow_pause, true);
+  assert.equal((await agent('POST', 'agent/heartbeat', { events: [] })).status, 400); // empty batch without agent info
+  const until = new Date(Date.now() + 15 * 60000).toISOString();
+  assert.equal((await agent('POST', 'agent/heartbeat', { events: [], agent: { version: '1.2.3', paused_until: until } })).status, 202);
+  run("UPDATE activity_events SET ts = datetime('now', '-30 minutes', 'localtime') WHERE employee_id = 4"); // no recent activity
+  let live = (await call('manager', 'GET', 'activity/live')).body;
+  let me = live.rows.find((r) => r.id === 4);
+  assert.equal(me.status, 'paused');
+  assert.ok(live.counts.paused >= 1);
+  assert.equal(me.current, null);
+  await agent('POST', 'agent/heartbeat', { events: [], agent: { version: '1.2.3', resumed: true } });
+  me = (await call('manager', 'GET', 'activity/live')).body.rows.find((r) => r.id === 4);
+  assert.notEqual(me.status, 'paused');
+
+  await call('hr', 'PUT', 'activity/settings', { agent_allow_pause: false });
+  assert.equal((await agent('GET', 'agent/config')).body.allow_pause, false);
+  assert.equal((await agent('POST', 'agent/heartbeat', { events: [], agent: { paused_until: until } })).status, 403);
+  await call('hr', 'PUT', 'activity/settings', { agent_allow_pause: true });
 });

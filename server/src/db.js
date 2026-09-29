@@ -25,6 +25,7 @@ export function migrate() {
   addColumn('agent_devices', 'agent_version', 'TEXT');
   addColumn('agent_devices', 'hostname', 'TEXT');
   addColumn('agent_devices', 'os', 'TEXT');
+  addColumn('agent_devices', 'paused_until', 'TEXT');
   addColumn('locations', 'latitude', 'REAL');
   addColumn('locations', 'longitude', 'REAL');
   addColumn('locations', 'radius_m', 'INTEGER DEFAULT 300');

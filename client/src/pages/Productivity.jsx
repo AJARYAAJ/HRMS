@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Activity, Gauge, Clock, Coffee, ThumbsDown, AppWindow, Radio, BellRing, ListChecks, Monitor, Settings2, Plus, Trash2, RefreshCw, Copy, Check, KeyRound, Save, Download, CircleDot, Moon, PowerOff } from 'lucide-react';
+import { Activity, Gauge, Clock, Coffee, ThumbsDown, AppWindow, Radio, BellRing, ListChecks, Monitor, Settings2, Plus, Trash2, RefreshCw, Copy, Check, KeyRound, Save, Download, PauseCircle, CircleDot, Moon, PowerOff } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { useGet, useAction, useAuth, useDisclosure, useToast } from '../lib/hooks';
 import { PageHeader, StatCard, StatSkeletons, Avatar, CardSkeleton, Badge, Tabs, Modal, Confirm, EmptyState, cx } from '../components/ui';
@@ -94,7 +94,7 @@ function Analytics() {
 }
 
 const ago = (m) => (m < 60 ? `${m} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ago` : `${Math.floor(m / 1440)} d ago`);
-const STATUS_ICON = { active: CircleDot, idle: Moon, offline: PowerOff };
+const STATUS_ICON = { active: CircleDot, idle: Moon, paused: PauseCircle, offline: PowerOff };
 
 /** Live board: who is active, idle or offline right now and what they're working in. */
 function Live() {
@@ -105,9 +105,9 @@ function Live() {
   return (
     <div className="space-y-6">
       {isLoading ? <StatSkeletons count={3} /> : (
-        <div className="grid grid-cols-3 gap-4" data-testid="live-counts">
-          {[['active', 'Active now', 'green'], ['idle', 'Idle', 'amber'], ['offline', 'Offline', 'slate']].map(([k, l, tone]) => (
-            <StatCard key={k} icon={STATUS_ICON[k]} tone={tone} label={l} value={data.counts[k]} onClick={() => setFilter(filter === k ? '' : k)} hint={filter === k ? 'Filtered · click to clear' : 'Click to filter'} />
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4" data-testid="live-counts">
+          {[['active', 'Active now', 'green'], ['idle', 'Idle', 'amber'], ['paused', 'Paused', 'violet'], ['offline', 'Offline', 'slate']].map(([k, l, tone]) => (
+            <StatCard key={k} icon={STATUS_ICON[k]} tone={tone} label={l} value={data.counts[k] ?? 0} onClick={() => setFilter(filter === k ? '' : k)} hint={filter === k ? 'Filtered · click to clear' : 'Click to filter'} />
           ))}
         </div>
       )}
@@ -116,7 +116,7 @@ function Live() {
         columns={[
           { key: 'name', header: 'Employee', width: 'minmax(220px, 1.6fr)', render: (r) => <div className="flex items-center gap-2" data-testid="live-row"><Avatar name={r.name} color={r.avatar_color} size="sm" /><div className="min-w-0"><div className="truncate font-semibold">{r.name}</div><div className="truncate text-xs muted">{r.designation || r.department}</div></div></div> },
           { key: 'status', header: 'Status', render: (r) => <Badge status={r.status}>{r.status}</Badge> },
-          { key: 'current', header: 'Working in', width: 'minmax(200px, 1.6fr)', sortable: false, csv: (r) => r.current?.domain || r.current?.app || '', render: (r) => (r.current ? <div className="min-w-0"><div className="truncate text-sm font-medium">{r.current.domain || r.current.app}</div><div className="truncate text-xs muted">{r.current.title || r.current.category}</div></div> : <span className="muted">{r.last_seen_minutes != null ? `Last seen ${ago(r.last_seen_minutes)}` : 'No agent data'}</span>) },
+          { key: 'current', header: 'Working in', width: 'minmax(200px, 1.6fr)', sortable: false, csv: (r) => r.current?.domain || r.current?.app || '', render: (r) => (r.current ? <div className="min-w-0"><div className="truncate text-sm font-medium">{r.current.domain || r.current.app}</div><div className="truncate text-xs muted">{r.current.title || r.current.category}</div></div> : <span className="muted">{r.status === 'paused' ? `Paused until ${new Date(`${r.paused_until.replace(' ', 'T')}Z`).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : r.last_seen_minutes != null ? `Last seen ${ago(r.last_seen_minutes)}` : 'No agent data'}</span>) },
           { key: 'clock_in', header: 'Clock-in', render: (r) => r.clock_in || '—' },
           { key: 'active_mins', header: 'Active today', render: (r) => minsToHours(r.active_mins) },
           { key: 'score', header: 'Score', render: (r) => (r.active_mins ? <Badge color={r.score >= 65 ? 'green' : r.score >= 50 ? 'amber' : 'red'}>{r.score}%</Badge> : '—') },
@@ -209,7 +209,7 @@ function AgentDownloads() {
       <p className="muted">Runs quietly in the background on Windows and macOS and starts at login.</p>
       <div className="mt-3 space-y-2">
         {isLoading ? <CardSkeleton lines={3} className="!border-0 !p-0 !shadow-none" /> : data.files.length === 0 ? (
-          <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">No agent builds on this server yet. Build them with <code>npm run agent:build</code> (needs Go 1.22+).</p>
+          <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">No agent builds on this server yet. Build them with <code>npm run agent:build</code> (needs Go 1.23+).</p>
         ) : data.files.map((f) => (
           <a key={f.file} href={f.url} download className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 transition hover:border-brand-400 dark:border-slate-700" data-testid="agent-download" title={`SHA-256 ${f.sha256}`}>
             <span className="font-medium">{f.label}</span><span className="text-xs muted">{fmtMB(f.size)}</span>
@@ -308,10 +308,10 @@ function ActivitySettings() {
   return (
     <form className="card card-pad max-w-2xl space-y-5" onSubmit={async (e) => {
       e.preventDefault();
-      const body = { screenshots_enabled: v.screenshots_enabled === '1', activity_attendance: v.activity_attendance === '1', ...Object.fromEntries(NUMS.map(([k]) => [k, Number(v[k])])) };
+      const body = { screenshots_enabled: v.screenshots_enabled === '1', activity_attendance: v.activity_attendance === '1', agent_allow_pause: v.agent_allow_pause === '1', ...Object.fromEntries(NUMS.map(([k]) => [k, Number(v[k])])) };
       if (await act('activity/settings', { method: 'PUT', body, success: 'Activity settings saved' })) setDraft(null);
     }}>
-      {[['screenshots_enabled', 'Capture screenshots', 'Agents upload periodic screenshots, visible to the employee, their managers and HR.'], ['activity_attendance', 'Auto clock-in from activity', 'The first activity of the day marks the employee present (remote) if they have not clocked in.']].map(([k, l, hint]) => (
+      {[['screenshots_enabled', 'Capture screenshots', 'Agents upload periodic screenshots, visible to the employee, their managers and HR.'], ['activity_attendance', 'Auto clock-in from activity', 'The first activity of the day marks the employee present (remote) if they have not clocked in.'], ['agent_allow_pause', 'Let employees pause tracking', 'The tray icon offers "Pause for 15 minutes / 1 hour". Managers see the person as paused on the live board.']].map(([k, l, hint]) => (
         <label key={k} className="flex items-start gap-3">
           <input type="checkbox" className="mt-1 h-4 w-4 accent-brand-600" checked={v[k] === '1'} onChange={set(k)} disabled={!isHR} data-testid={`setting-${k}`} />
           <span><span className="font-medium">{l}</span><span className="block text-xs muted">{hint}</span></span>

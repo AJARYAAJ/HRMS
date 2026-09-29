@@ -44,6 +44,36 @@ type fakeServer struct {
 	down        bool
 	revoked     bool
 	screenshots bool
+	allowPause  bool
+	sawPaused   bool
+	sawResumed  bool
+}
+
+func (s *fakeServer) snapshotEvents() []Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Event(nil), s.events...)
+}
+
+func (s *fakeServer) flags() (paused, resumed bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sawPaused, s.sawResumed
+}
+
+func (s *fakeServer) lastInfo() AgentInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.agents) == 0 {
+		return AgentInfo{}
+	}
+	return s.agents[len(s.agents)-1]
+}
+
+func newFakeHTTP(t *testing.T, s *fakeServer) string {
+	ts := httptest.NewServer(s.handler(t))
+	t.Cleanup(ts.Close)
+	return ts.URL
 }
 
 func (s *fakeServer) handler(t *testing.T) http.Handler {
@@ -61,7 +91,7 @@ func (s *fakeServer) handler(t *testing.T) http.Handler {
 		}
 		switch r.URL.Path {
 		case "/api/agent/config":
-			json.NewEncoder(w).Encode(map[string]any{"device_id": 7, "heartbeat_seconds": 60, "screenshots_enabled": s.screenshots, "screenshot_interval_mins": 1, "idle_threshold_seconds": 60, "away_after_minutes": 30})
+			json.NewEncoder(w).Encode(map[string]any{"device_id": 7, "heartbeat_seconds": 60, "screenshots_enabled": s.screenshots, "screenshot_interval_mins": 1, "idle_threshold_seconds": 60, "away_after_minutes": 30, "allow_pause": s.allowPause})
 		case "/api/agent/heartbeat":
 			var body struct {
 				Events []Event   `json:"events"`
@@ -72,6 +102,12 @@ func (s *fakeServer) handler(t *testing.T) http.Handler {
 			}
 			s.events = append(s.events, body.Events...)
 			s.agents = append(s.agents, body.Agent)
+			if body.Agent.PausedUntil != "" {
+				s.sawPaused = true
+			}
+			if body.Agent.Resumed {
+				s.sawResumed = true
+			}
 			w.WriteHeader(202)
 			io.WriteString(w, `{"accepted":1}`)
 		case "/api/agent/screenshot":
@@ -96,15 +132,23 @@ func newTestAgent(t *testing.T, url string, p Platform) (*Agent, *time.Time) {
 	t.Setenv("PEOPLEHUB_AGENT_HOME", t.TempDir())
 	a := NewAgent(Config{Server: url, Token: "tok"}, p, log.New(io.Discard, "", 0))
 	clock := at("10:00:00")
-	a.now = func() time.Time { return clock }
+	a.now = func() time.Time { clockMu.Lock(); defer clockMu.Unlock(); return clock }
 	return a, &clock
 }
+
+// clockMu guards the fake clock, which background goroutines (status pings) also read.
+var clockMu sync.Mutex
 
 // step advances the fake clock one sample at a time (the real loop does this on a 5 s ticker).
 func step(a *Agent, clock *time.Time, d time.Duration) error {
 	var err error
-	for end := clock.Add(d); clock.Before(end); {
+	clockMu.Lock()
+	end := clock.Add(d)
+	clockMu.Unlock()
+	for a.now().Before(end) {
+		clockMu.Lock()
 		*clock = clock.Add(sampleEvery)
+		clockMu.Unlock()
 		a.tick(context.Background())
 		if e := a.sendDue(context.Background()); e != nil {
 			err = e

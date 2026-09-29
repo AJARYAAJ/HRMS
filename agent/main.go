@@ -208,7 +208,11 @@ func cmdRun() error {
 	if ch := stopChannel(); ch != nil {
 		go func() { <-ch; stop() }()
 	}
-	return NewAgent(cfg, p, logger).Run(ctx)
+	a := NewAgent(cfg, p, logger)
+	if os.Getenv("PEOPLEHUB_AGENT_NO_TRAY") == "1" {
+		return a.Run(ctx)
+	}
+	return runUI(a, func() error { return a.Run(ctx) })
 }
 
 func cmdStatus() error {

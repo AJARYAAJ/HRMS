@@ -24,10 +24,10 @@ const normDomain = (d) => String(d || '').trim().toLowerCase().replace(/^[a-z]+:
 export const ACTIVITY_DEFAULTS = {
   screenshots_enabled: '0', screenshot_interval_mins: '10', idle_alert_minutes: '30',
   unproductive_alert_minutes: '60', overwork_hours: '10', activity_attendance: '1', live_window_minutes: '3',
-  idle_threshold_seconds: '120', away_after_minutes: '60',
+  idle_threshold_seconds: '120', away_after_minutes: '60', agent_allow_pause: '1',
 };
 export function activitySettings() {
-  const saved = Object.fromEntries(all("SELECT key, value FROM settings WHERE key LIKE 'activity_%' OR key IN ('screenshots_enabled','screenshot_interval_mins','idle_alert_minutes','unproductive_alert_minutes','overwork_hours','live_window_minutes','idle_threshold_seconds','away_after_minutes')").map((r) => [r.key, r.value]));
+  const saved = Object.fromEntries(all("SELECT key, value FROM settings WHERE key LIKE 'activity_%' OR key IN ('screenshots_enabled','screenshot_interval_mins','idle_alert_minutes','unproductive_alert_minutes','overwork_hours','live_window_minutes','idle_threshold_seconds','away_after_minutes','agent_allow_pause')").map((r) => [r.key, r.value]));
   return { ...ACTIVITY_DEFAULTS, ...saved };
 }
 
@@ -114,12 +114,15 @@ agentRouter.get('/config', (req, res) => {
     employee_id: req.device.employee_id, device_id: req.device.id, heartbeat_seconds: 60,
     screenshots_enabled: s.screenshots_enabled === '1', screenshot_interval_mins: Number(s.screenshot_interval_mins),
     idle_threshold_seconds: Number(s.idle_threshold_seconds), away_after_minutes: Number(s.away_after_minutes),
+    allow_pause: s.agent_allow_pause === '1',
   });
 });
 
 agentRouter.post('/heartbeat', (req, res) => {
   const events = Array.isArray(req.body?.events) ? req.body.events : [req.body];
-  if (!events.length || events.length > 500) throw httpError(400, 'Send between 1 and 500 events per request');
+  const info = req.body?.agent && typeof req.body.agent === 'object' ? req.body.agent : null;
+  // An empty batch is allowed as a status ping (e.g. pause/resume from the tray icon) when agent info is sent.
+  if ((!events.length && !info) || events.length > 500) throw httpError(400, 'Send between 1 and 500 events per request');
   const classify = classifier();
   const { employee_id: employeeId, department_id: departmentId } = req.device;
   const dates = new Set();
@@ -141,11 +144,18 @@ agentRouter.post('/heartbeat', (req, res) => {
     }
     run("UPDATE agent_devices SET last_seen_at = datetime('now') WHERE id = ?", req.device.id);
     // The desktop agent reports its version, OS and machine name so IT can see what's deployed.
-    const a = req.body?.agent;
-    if (a && typeof a === 'object') {
+    if (info) {
       const clip = (v, n) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);
       run('UPDATE agent_devices SET agent_version = COALESCE(?, agent_version), os = COALESCE(?, os), hostname = COALESCE(?, hostname) WHERE id = ?',
-        clip(a.version, 40), clip(a.os, 40), clip(a.hostname, 100), req.device.id);
+        clip(info.version, 40), clip(info.os, 40), clip(info.hostname, 100), req.device.id);
+      // Pauses from the tray icon (at most 24 h ahead), so managers see "paused" instead of "offline".
+      const until = info.paused_until ? new Date(info.paused_until) : null;
+      if (until && !Number.isNaN(until.getTime()) && until.getTime() > now && until.getTime() <= now + 86400000) {
+        if (activitySettings().agent_allow_pause !== '1') throw httpError(403, 'Pausing is turned off for this organisation');
+        run('UPDATE agent_devices SET paused_until = ? WHERE id = ?', until.toISOString().slice(0, 19).replace('T', ' '), req.device.id);
+      } else if (info.resumed || events.length) {
+        run('UPDATE agent_devices SET paused_until = NULL WHERE id = ?', req.device.id);
+      }
     }
     for (const d of dates) rollupDay(employeeId, d);
     // Auto attendance: the first activity of the day clocks the employee in (if they haven't already).
@@ -176,7 +186,7 @@ activityRouter.get('/devices', (req, res) => {
   const where = isHR(req.user) ? (req.query.employee_id ? 'WHERE d.employee_id = ?' : '') : 'WHERE d.employee_id = ?';
   const params = isHR(req.user) ? (req.query.employee_id ? [req.query.employee_id] : []) : [req.user.id];
   res.json(all(
-    `SELECT d.id, d.employee_id, d.name, d.platform, d.agent_version, d.os, d.hostname, d.last_seen_at, d.revoked, d.created_at, ${NAME('e')} AS employee_name, e.avatar_color
+    `SELECT d.id, d.employee_id, d.name, d.platform, d.agent_version, d.os, d.hostname, d.paused_until, d.last_seen_at, d.revoked, d.created_at, ${NAME('e')} AS employee_name, e.avatar_color
      FROM agent_devices d JOIN employees e ON e.id = d.employee_id ${where} ORDER BY d.id DESC`, ...params,
   ));
 });
@@ -209,7 +219,8 @@ activityRouter.get('/live', requireRole('admin', 'hr', 'manager'), (req, res) =>
   const rows = all(
     `SELECT e.id, ${NAME('e')} AS name, e.avatar_color, d.name AS department, g.title AS designation,
             (SELECT MAX(ts) FROM activity_events a WHERE a.employee_id = e.id) AS last_ts,
-            p.productive_mins, p.neutral_mins, p.unproductive_mins, p.idle_mins, att.clock_in, att.clock_out
+            p.productive_mins, p.neutral_mins, p.unproductive_mins, p.idle_mins, att.clock_in, att.clock_out,
+            (SELECT MAX(paused_until) FROM agent_devices v WHERE v.employee_id = e.id AND v.revoked = 0 AND v.paused_until > datetime('now')) AS paused_until
      FROM employees e LEFT JOIN departments d ON d.id = e.department_id LEFT JOIN designations g ON g.id = e.designation_id
      LEFT JOIN productivity p ON p.employee_id = e.id AND p.date = ?
      LEFT JOIN attendance att ON att.employee_id = e.id AND att.date = ?
@@ -219,16 +230,17 @@ activityRouter.get('/live', requireRole('admin', 'hr', 'manager'), (req, res) =>
   const out = rows.map((r) => {
     const last = r.last_ts ? get('SELECT app, domain, title, category, active_seconds FROM activity_events WHERE employee_id = ? AND ts = ? ORDER BY id DESC LIMIT 1', r.id, r.last_ts) : null;
     const ageMin = r.last_ts ? (now - new Date(r.last_ts.replace(' ', 'T')).getTime()) / 60000 : Infinity;
-    const status = ageMin <= windowMins ? (last?.active_seconds > 0 ? 'active' : 'idle') : 'offline';
+    let status = ageMin <= windowMins ? (last?.active_seconds > 0 ? 'active' : 'idle') : 'offline';
+    if (r.paused_until && status !== 'active') status = 'paused';
     const active = (r.productive_mins || 0) + (r.neutral_mins || 0) + (r.unproductive_mins || 0);
     return {
       ...r, status, last_seen_minutes: Number.isFinite(ageMin) ? Math.round(ageMin) : null,
-      current: status === 'offline' ? null : last && { app: last.app, domain: last.domain, title: last.title, category: last.category },
+      current: ['offline', 'paused'].includes(status) ? null : last && { app: last.app, domain: last.domain, title: last.title, category: last.category },
       active_mins: active, score: active + (r.idle_mins || 0) ? Math.round(((r.productive_mins || 0) / (active + (r.idle_mins || 0))) * 100) : 0,
     };
   });
   res.json({
-    counts: { active: out.filter((r) => r.status === 'active').length, idle: out.filter((r) => r.status === 'idle').length, offline: out.filter((r) => r.status === 'offline').length },
+    counts: { active: out.filter((r) => r.status === 'active').length, idle: out.filter((r) => r.status === 'idle').length, offline: out.filter((r) => r.status === 'offline').length, paused: out.filter((r) => r.status === 'paused').length },
     rows: out,
   });
 });
@@ -352,7 +364,7 @@ activityRouter.put('/settings', requireRole('admin', 'hr'), (req, res) => {
     run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', k, String(v));
   };
   tx(() => {
-    for (const k of ['screenshots_enabled', 'activity_attendance']) if (k in b) run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', k, b[k] ? '1' : '0');
+    for (const k of ['screenshots_enabled', 'activity_attendance', 'agent_allow_pause']) if (k in b) run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', k, b[k] ? '1' : '0');
     num('screenshot_interval_mins', 1, 120);
     num('idle_alert_minutes', 5, 240);
     num('unproductive_alert_minutes', 10, 480);

@@ -4,10 +4,11 @@ A small background program for **Windows 10/11** and **macOS 12+**. Every few se
 is in focus and whether the person is active or idle, and sends that to PeopleHub once a minute. PeopleHub then
 builds the productivity analytics: the live board, timelines, app and website usage, and alerts.
 
-- A single ~3–6 MB executable with no runtime or dependencies. It is written in Go, using only the standard library.
+- A single ~3–7 MB executable with no runtime to install. It is written in Go: the standard library, plus [purego](https://github.com/ebitengine/purego) on macOS for the menu bar icon (so it builds without Xcode or cgo).
 - It starts at login in the user's session and uses almost no CPU.
 - Nothing is lost when offline: activity is queued on disk for up to 7 days and uploaded when the connection returns.
 - It stops by itself when an admin revokes the device in PeopleHub.
+- A tray icon (Windows notification area, macOS menu bar) shows what it's doing and lets people take a break.
 
 ## What is collected
 
@@ -21,6 +22,34 @@ builds the productivity analytics: the live board, timelines, app and website us
 | Agent version, OS, computer name | Shown to admins in Productivity → Devices |
 
 The agent never records keystrokes, clipboard contents, files, microphone, camera or full URLs.
+
+## Tray icon
+
+The agent shows the PeopleHub icon in the Windows notification area or the macOS menu bar. A coloured dot shows
+the state:
+
+| Dot | Meaning |
+| --- | --- |
+| Green | tracking activity |
+| Amber | idle, or paused |
+| Grey | away, or offline (uploads are queued) |
+| Red | stopped: the device was revoked |
+
+Clicking the icon opens a menu with:
+
+- the current status, the last upload time, and whether screenshots are on;
+- **Pause for 15 minutes / 1 hour**, then **Resume tracking**. These only appear if the admin allows pausing
+  (Productivity → Settings → "Let employees pause tracking", on by default). While paused nothing is recorded, and
+  managers see the person as *Paused* on the live board, not *Offline*;
+- **View my activity**, which opens the employee's own timeline in PeopleHub;
+- **Open PeopleHub**;
+- the agent version.
+
+On Windows, the first start shows a one-time notification that activity is shared with PeopleHub. The icon comes
+back by itself if Explorer restarts.
+
+The icon needs a desktop session. Over SSH, or on a server without a shell, the agent runs normally without it.
+Set `PEOPLEHUB_AGENT_NO_TRAY=1` to hide the icon, for example on shared kiosks.
 
 ## Installing
 
@@ -117,11 +146,11 @@ Logs are written to `agent.log` in the data folder (rotated at 5 MB).
 
 ## Building and testing
 
-Requires Go 1.22+.
+Requires Go 1.23+.
 
 ```sh
 npm run agent:build      # cross-compiles all four builds into agent/dist (served by PeopleHub automatically)
-npm run agent:test       # unit tests: minute roll-up, offline queue, uploads, outages, idle/away, revocation
+npm run agent:test       # unit tests: minute roll-up, offline queue, uploads, outages, idle/away, pause, revocation, tray menu and icons
 ```
 
 | Build | File |
@@ -136,7 +165,8 @@ The macOS builds are zipped so the executable bit survives a browser download. T
 
 The **Desktop agent** GitHub Actions workflow (`.github/workflows/agent.yml`) runs:
 
-- the Go tests on Linux, Windows and macOS;
+- the Go tests on Linux, Windows and macOS. On Windows and macOS these include creating the real tray/menu-bar
+  icon and menu;
 - on real Windows and macOS runners: starts PeopleHub, installs the agent with the one-line installer, waits for
   its first upload, then uninstalls it;
 - the cross-compile, uploaded as an artifact and attached to GitHub releases.

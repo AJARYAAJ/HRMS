@@ -23,6 +23,7 @@ type RemoteConfig struct {
 	ScreenshotIntervalMin int  `json:"screenshot_interval_mins"`
 	IdleThresholdSeconds  int  `json:"idle_threshold_seconds"`
 	AwayAfterMinutes      int  `json:"away_after_minutes"`
+	AllowPause            bool `json:"allow_pause"`
 }
 
 func (c RemoteConfig) withDefaults() RemoteConfig {
@@ -43,9 +44,11 @@ func (c RemoteConfig) withDefaults() RemoteConfig {
 
 // AgentInfo is reported with heartbeats so IT can see versions and machines in the HRMS.
 type AgentInfo struct {
-	Version  string `json:"version"`
-	OS       string `json:"os"`
-	Hostname string `json:"hostname"`
+	Version     string `json:"version"`
+	OS          string `json:"os"`
+	Hostname    string `json:"hostname"`
+	PausedUntil string `json:"paused_until,omitempty"`
+	Resumed     bool   `json:"resumed,omitempty"`
 }
 
 var (

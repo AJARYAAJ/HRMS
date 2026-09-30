@@ -125,7 +125,7 @@ curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt -y install nodejs nginx
 node -v                                   # must be v22.13 or newer
 
-# 2. (Optional) Go 1.23+, to build the Windows/macOS desktop agent downloads
+# 2. (Optional) Go 1.24+, to build the Windows/macOS desktop agent downloads
 sudo snap install go --classic
 
 # 3. A dedicated system user that owns the app

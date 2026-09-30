@@ -146,7 +146,7 @@ Logs are written to `agent.log` in the data folder (rotated at 5 MB).
 
 ## Building and testing
 
-Requires Go 1.23+.
+Requires Go 1.24+ (older Go linkers omit the LC_UUID load command, and current macOS refuses to run such binaries).
 
 ```sh
 npm run agent:build      # cross-compiles all four builds into agent/dist (served by PeopleHub automatically)

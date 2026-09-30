@@ -14,7 +14,7 @@ COPY client client
 RUN npm run build -w client
 
 # 2) Cross-compile the desktop agent for Windows and macOS (served from Productivity → Devices)
-FROM golang:1.23-bookworm AS agent
+FROM golang:1.24-bookworm AS agent
 WORKDIR /agent
 COPY agent/go.mod agent/go.sum ./
 RUN go mod download

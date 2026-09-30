@@ -82,7 +82,7 @@ npm run dev
 
 Reset demo data at any time: `npm run seed`.
 
-Desktop activity agent for Windows and macOS (needs Go 1.23+ to build; see [agent/README.md](agent/README.md)):
+Desktop activity agent for Windows and macOS (needs Go 1.24+ to build; see [agent/README.md](agent/README.md)):
 
 ```bash
 npm run agent:build   # builds agent/dist; PeopleHub then offers downloads and one-line installers in Productivity → Devices

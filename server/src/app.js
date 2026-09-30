@@ -17,6 +17,8 @@ import { peopleRouter } from './routes/people.js';
 import { careersRouter, offersRouter } from './routes/careers.js';
 import { agentDownloadsRouter } from './routes/agentDownloads.js';
 import { clientsRouter, projectsRouter, opportunitiesRouter, resourcesRouter, financeRouter } from './routes/psa.js';
+import { exportsRouter } from './routes/exports.js';
+import { analyticsRouter } from './routes/analytics.js';
 import { workRouter, travelRouter } from './routes/work.js';
 import { agentRouter, activityRouter } from './routes/activity.js';
 import { hrdocsRouter, lettersRouter, letterRequestsRouter, customFieldsRouter, kbRouter } from './routes/hrdocs.js';
@@ -73,6 +75,8 @@ export function createApp() {
   api.use('/opportunities', opportunitiesRouter);
   api.use('/resources', resourcesRouter);
   api.use('/finance', financeRouter);
+  api.use('/exports', exportsRouter);
+  api.use('/analytics', analyticsRouter);
   api.use('/timesheets', m.timesheetsRouter);
   api.use('/assets', m.assetsRouter);
   api.use('/tickets', m.ticketsRouter);

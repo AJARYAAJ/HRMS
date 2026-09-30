@@ -2,7 +2,7 @@ import { lazy } from 'react';
 import {
   LayoutDashboard, CheckSquare, Clock, CalendarDays, Timer, Wallet, Receipt, LifeBuoy, FileText, GraduationCap, Laptop,
   Users, Network, UserPlus, Target, PartyPopper, Briefcase, Activity, Banknote, BarChart3, Building2, Settings, ShieldCheck, UserCircle,
-  LogOut, ListTodo, Plane, Calendar, CalendarRange, Building, FolderKanban, Crosshair, UsersRound, Landmark,
+  LogOut, ListTodo, Plane, Calendar, CalendarRange, Building, FolderKanban, Crosshair, UsersRound, Landmark, PieChart, DownloadCloud,
 } from 'lucide-react';
 
 // Every page is its own chunk; `load` is reused for hover-prefetching from the sidebar.
@@ -48,6 +48,8 @@ export const pages = {
   opportunities: page(() => import('./pages/Opportunities')),
   resources: page(() => import('./pages/Resources')),
   finance: page(() => import('./pages/Finance')),
+  analytics: page(() => import('./pages/Analytics')),
+  exports: page(() => import('./pages/Exports')),
 };
 
 const ALL = ['admin', 'hr', 'manager', 'employee'];
@@ -92,12 +94,14 @@ export const navGroups = [
     { path: '/recruitment', label: 'Recruitment', icon: Briefcase, page: 'recruitment', roles: MGR },
     { path: '/roster', label: 'Shift roster', icon: CalendarRange, page: 'roster', roles: MGR },
     { path: '/productivity', label: 'Productivity', icon: Activity, page: 'productivity', roles: MGR },
+    { path: '/analytics', label: 'Analytics', icon: PieChart, page: 'analytics', roles: MGR },
     { path: '/reports', label: 'Reports', icon: BarChart3, page: 'reports', roles: MGR },
   ] },
   { label: 'Administration', items: [
     { path: '/payroll', label: 'Payroll', icon: Banknote, page: 'payroll', roles: HR },
     { path: '/organization', label: 'Organization', icon: Building2, page: 'organization', roles: HR },
     { path: '/settings', label: 'Settings', icon: Settings, page: 'settings', roles: HR },
+    { path: '/exports', label: 'Bulk export', icon: DownloadCloud, page: 'exports', roles: HR },
     { path: '/audit-log', label: 'Audit Log', icon: ShieldCheck, page: 'audit', roles: HR },
   ] },
 ];

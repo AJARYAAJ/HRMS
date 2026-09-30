@@ -28,7 +28,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export function createApp() {
   const app = express();
   if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY);
-  app.use(cors());
+  app.disable('x-powered-by');
+  // The SPA is served from the same origin, so cross-origin access is only enabled in development or for listed origins.
+  if (process.env.CORS_ORIGIN) app.use(cors({ origin: process.env.CORS_ORIGIN.split(',').map((o) => o.trim()) }));
+  else if (process.env.NODE_ENV !== 'production') app.use(cors());
+  app.use((req, res, next) => {
+    res.set({ 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Permissions-Policy': 'geolocation=(self), camera=(), microphone=()' });
+    if (req.secure) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    next();
+  });
   app.use(express.json({ limit: '2mb' }));
 
   const api = express.Router();
@@ -105,8 +113,14 @@ export function createApp() {
   // Serve the built SPA when it exists (production / e2e).
   const dist = path.join(__dirname, '..', '..', 'client', 'dist');
   if (fs.existsSync(dist)) {
-    app.use(express.static(dist));
-    app.get(/^(?!\/api).*/, (req, res) => res.sendFile(path.join(dist, 'index.html')));
+    // Hashed build assets are cached for a year; index.html and the service worker are always revalidated,
+    // so a deploy shows up on the next page load.
+    app.use(express.static(dist, {
+      setHeaders(res, file) {
+        res.set('Cache-Control', /[\\/]assets[\\/]/.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache');
+      },
+    }));
+    app.get(/^(?!\/api).*/, (req, res) => res.set('Cache-Control', 'no-cache').sendFile(path.join(dist, 'index.html')));
   }
 
   // eslint-disable-next-line no-unused-vars

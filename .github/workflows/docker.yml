@@ -1,0 +1,34 @@
+name: Docker image
+
+on:
+  push:
+    branches: [main]
+    paths: ['Dockerfile', '.dockerignore', 'docker-compose.yml', 'deploy/**', 'server/**', 'client/**', 'agent/**', 'package-lock.json', '.github/workflows/docker.yml']
+  workflow_dispatch:
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the production image
+        run: docker build -t peoplehub:ci .
+      - name: Start it the way production does (fresh organisation, no demo data)
+        run: |
+          docker run -d --name ph -p 4000:4000 \
+            -e JWT_SECRET="$(openssl rand -hex 32)" -e ADMIN_EMAIL=owner@ci.example -e ADMIN_PASSWORD='Ci-Passw0rd-123' \
+            -e COMPANY_NAME='CI Test Ltd' peoplehub:ci
+          for i in $(seq 1 30); do curl -fsS http://localhost:4000/api/health && break; sleep 2; done
+      - name: Smoke test
+        run: |
+          set -e
+          curl -fsS http://localhost:4000/ | grep -q '<div id="root">'
+          curl -fsSI http://localhost:4000/ | grep -qi 'x-content-type-options: nosniff'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'content-type: application/json' -d '{"email":"admin@peoplehub.demo","password":"Password@123"}' http://localhost:4000/api/auth/login)" = 401
+          curl -fsS -H 'content-type: application/json' -d '{"email":"owner@ci.example","password":"Ci-Passw0rd-123"}' http://localhost:4000/api/auth/login | grep -q token
+          curl -fsS http://localhost:4000/api/agent-downloads | grep -q 'peoplehub-agent-windows-amd64.exe'
+          docker exec ph node --no-warnings scripts/backup.mjs
+          echo "Image OK"
+      - name: Container logs
+        if: always()
+        run: docker logs ph || true

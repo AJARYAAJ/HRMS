@@ -2,6 +2,10 @@ import jwt from 'jsonwebtoken';
 import { get, all } from './db.js';
 
 export const JWT_SECRET = process.env.JWT_SECRET || 'peoplehub-dev-secret-change-me';
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32 || /change-me/.test(process.env.JWT_SECRET))) {
+  console.error('Set JWT_SECRET to a random string of at least 32 characters before running in production (generate one with: openssl rand -hex 32).');
+  process.exit(1);
+}
 
 export const ROLE_RANK = { employee: 1, manager: 2, hr: 3, admin: 4 };
 

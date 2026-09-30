@@ -16,11 +16,15 @@
     "test:api": "npm test -w server",
     "agent:simulate": "node scripts/agent-simulator.mjs",
     "agent:build": "cd agent && go run ./tools/dist -out dist",
-    "agent:test": "cd agent && go test ./..."
+    "agent:test": "cd agent && go test ./...",
+    "backup": "node --no-warnings scripts/backup.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",
     "concurrently": "^9.2.1",
     "smtp-server": "^3.19.15"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }

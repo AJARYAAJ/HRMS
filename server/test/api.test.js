@@ -133,3 +133,11 @@ test('every mutation is written to the audit log', async () => {
   assert.ok(logs.some((l) => l.action === 'run_payroll'));
   assert.equal((await call('employee', 'GET', 'audit-logs')).status, 403);
 });
+
+test('login is rate limited after repeated failures for the same email', async () => {
+  const bad = { email: 'ratelimit.target@peoplehub.demo', password: 'wrong-password' };
+  let last;
+  for (let i = 0; i < 11; i++) last = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bad) });
+  assert.equal(last.status, 429);
+  assert.match((await last.json()).error, /Too many failed sign-in attempts/);
+});

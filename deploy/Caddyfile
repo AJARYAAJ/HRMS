@@ -1,0 +1,8 @@
+# Automatic HTTPS for PeopleHub. Caddy obtains and renews the certificate for $DOMAIN.
+{$DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 25MB
+	}
+	reverse_proxy app:4000
+}

@@ -1,8 +1,11 @@
 node_modules
-dist
+**/node_modules
+client/dist
+agent/dist
 server/data
+backups
 test-results
 playwright-report
+.git
 .env
-agent/dist
-backups
+*.log

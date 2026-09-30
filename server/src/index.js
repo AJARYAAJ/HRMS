@@ -2,11 +2,26 @@ import { migrate, get } from './db.js';
 import { seed } from './seed.js';
 import { createApp } from './app.js';
 import { startMailer, smtpConfig } from './mailer.js';
+import { bootstrapProduction } from './bootstrap.js';
 
+const production = process.env.NODE_ENV === 'production';
 migrate();
-if (process.env.RESET_DB === '1' || !get('SELECT id FROM employees LIMIT 1')) {
-  console.log('Seeding database with demo data…');
-  seed();
+if (process.env.RESET_DB === '1') {
+  console.log('RESET_DB=1: reseeding the database with demo data…');
+  seed({ reset: true });
+} else if (!get('SELECT id FROM employees LIMIT 1')) {
+  if (production && process.env.SEED_DEMO !== '1') {
+    try {
+      const admin = bootstrapProduction();
+      console.log(`First start: created the organisation and administrator ${admin.email}. Sign in and complete Settings.`);
+    } catch (err) {
+      console.error(err.message);
+      process.exit(1);
+    }
+  } else {
+    console.log('Seeding database with demo data…');
+    seed();
+  }
 }
 
 startMailer();

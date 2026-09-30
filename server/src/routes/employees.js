@@ -32,13 +32,30 @@ export function sanitize(emp, viewer) {
 }
 
 // ---------- auth ----------
+// Brute-force protection: after LOGIN_MAX_FAILURES failed attempts for the same IP + email within the window,
+// further attempts are refused until the window passes. In-memory, so it resets on restart.
+const loginFailures = new Map();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const loginMax = () => Number(process.env.LOGIN_MAX_FAILURES) || 10;
+
 export function loginHandler(req, res) {
   const { email, password } = req.body || {};
   if (!email || !password) throw httpError(400, 'Email and password are required');
+  const key = `${req.ip}|${String(email).trim().toLowerCase()}`;
+  const now = Date.now();
+  const rec = loginFailures.get(key);
+  if (rec && now - rec.first < LOGIN_WINDOW_MS && rec.count >= loginMax()) {
+    const mins = Math.ceil((LOGIN_WINDOW_MS - (now - rec.first)) / 60000);
+    throw httpError(429, `Too many failed sign-in attempts. Try again in ${mins} minute${mins === 1 ? '' : 's'} or reset your password.`);
+  }
   const user = get('SELECT * FROM employees WHERE lower(email) = lower(?)', email.trim());
   if (!user || !user.password_hash || !bcrypt.compareSync(password, user.password_hash)) {
+    const fresh = !rec || now - rec.first >= LOGIN_WINDOW_MS;
+    loginFailures.set(key, { first: fresh ? now : rec.first, count: fresh ? 1 : rec.count + 1 });
+    if (loginFailures.size > 10000) loginFailures.clear();
     throw httpError(401, 'Invalid email or password');
   }
+  loginFailures.delete(key);
   if (user.status === 'exited') throw httpError(403, 'This account has been deactivated');
   audit(user.id, 'login', 'employees', user.id);
   res.json({ token: signToken(user), user: sanitize(get(`${EMP_SELECT} WHERE t.id = ?`, user.id), user) });

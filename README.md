@@ -55,6 +55,12 @@ e2e/     Playwright end-to-end tests (76 tests across all modules and roles, wit
 - **Installable PWA**: web manifest and a service worker that caches the app shell and hashed assets (API calls are never cached).
 - **Large datasets**: the `DataTable` is virtualised and renders only visible rows, so 5,000+ records scroll smoothly (covered by an E2E test). It also has debounced search, multi-type sorting and CSV export.
 
+## Going live
+
+To deploy on your own cloud VM (AWS, Azure, Google Cloud, DigitalOcean, …) with HTTPS, email, backups and one-command
+updates, follow **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. It covers Docker (recommended) and a direct install.
+In production the first start creates your organisation and administrator from `.env`, not demo data.
+
 ## Getting started
 
 Requires **Node.js 22.9+** (uses the built-in `node:sqlite` and `--env-file-if-exists`).
@@ -104,14 +110,18 @@ All passwords are `Password@123`, and the login screen has one-click buttons for
 | `PORT` | `4000` | HTTP port |
 | `DB_PATH` | `server/data/hrms.db` | SQLite database file |
 | `JWT_SECRET` | dev secret | **Set in production** |
-| `RESET_DB` | – | `1` reseeds on start |
+| `RESET_DB` | – | `1` reseeds demo data on start (destroys existing data) |
+| `NODE_ENV` | – | `production` requires `JWT_SECRET` and creates a clean organisation on first start |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | – | First production start: the administrator account |
+| `SEED_DEMO` | – | `1` loads demo data even in production (demo servers only) |
+| `TRUST_PROXY` | – | `1` behind Nginx/Caddy |
 | `APP_URL` | `http://localhost:$PORT` | Public URL used for links in emails |
 | `UPLOAD_DIR` | `server/data/uploads` | Where uploaded files are stored (keep it outside the web root and back it up) |
 | `MAX_UPLOAD_MB` | `10` | Maximum upload size |
 | `SMTP_HOST` | – | SMTP server. Unset = emails are recorded in the outbox but not sent |
 | `SMTP_PORT` | `587` | `465` enables implicit TLS automatically |
 | `SMTP_USER` / `SMTP_PASS` | – | SMTP credentials |
-| `SMTP_FROM` | company HR address | e.g. `"Acme HR" <hr@acme.com>` |
+| `SMTP_FROM` | company HR address | e.g. `"Acme HR <hr@acme.com>"` (keep the quotes) |
 | `SMTP_SECURE` | auto | Force TLS on/off (`true`/`false`) |
 
 Copy `.env.example` for a starting point. SMTP works with any provider (Gmail/Google Workspace app passwords, Microsoft 365, Amazon SES, SendGrid, Mailgun, Zoho Mail, Postmark and others).

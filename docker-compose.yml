@@ -1,0 +1,36 @@
+# PeopleHub HRMS with automatic HTTPS (Caddy + Let's Encrypt).
+# 1. Point your domain's DNS A record at this server.   2. cp .env.example .env and edit it.   3. docker compose up -d
+services:
+  app:
+    build: .
+    image: peoplehub:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      TRUST_PROXY: "1"
+      DB_PATH: /data/hrms.db
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - peoplehub-data:/data
+    expose:
+      - "4000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env, e.g. hr.example.com}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  peoplehub-data:
+  caddy-data:
+  caddy-config:

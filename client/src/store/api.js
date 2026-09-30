@@ -31,6 +31,7 @@ const RELATED = {
   candidates: ['jobs', 'employees', 'onboarding', 'dashboard', 'reports'],
   interviews: ['candidates'],
   onboarding: ['employees'],
+  preboarding: ['onboarding', 'employees', 'candidates'],
   payroll: ['reports', 'dashboard'],
   kudos: ['dashboard'],
   announcements: ['dashboard'],

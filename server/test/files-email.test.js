@@ -105,9 +105,11 @@ test('rejects disallowed types, spoofed content and oversized files', async () =
   assert.equal(tooBig.status, 413);
   const missing = await call('employee', 'POST', 'attachments', form({ entity: 'expenses', entity_id: exp.id }));
   assert.equal(missing.status, 400);
-  // Nothing from the rejected uploads is left on disk (seeded policy PDFs + the two valid uploads above).
+  // Nothing from the rejected uploads is left on disk: every file belongs to an attachment, pre-boarding document or photo.
   const onDisk = fs.readdirSync(process.env.UPLOAD_DIR).length;
-  assert.equal(onDisk, get('SELECT COUNT(*) AS n FROM attachments').n);
+  const known = get('SELECT COUNT(*) AS n FROM attachments').n + get('SELECT COUNT(*) AS n FROM preboarding_documents').n
+    + get('SELECT COUNT(*) AS n FROM employees WHERE photo_file IS NOT NULL').n;
+  assert.equal(onDisk, known);
 });
 
 test('documents: employee uploads a personal file, HR sees it, company PDFs are downloadable', async () => {

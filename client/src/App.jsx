@@ -10,6 +10,7 @@ const Login = lazy(() => import('./pages/Login'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const Careers = lazy(() => import('./pages/Careers'));
 const Verify = lazy(() => import('./pages/Verify'));
+const JoinPortal = lazy(() => import('./pages/JoinPortal'));
 
 function RequireAuth({ children }) {
   const token = useSelector((s) => s.auth.token);
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/login" element={<Suspense fallback={null}><Login /></Suspense>} />
         <Route path="/reset-password" element={<Suspense fallback={null}><ResetPassword /></Suspense>} />
         <Route path="/careers" element={<Suspense fallback={null}><Careers /></Suspense>} />
+        <Route path="/join/:token" element={<Suspense fallback={null}><JoinPortal /></Suspense>} />
         <Route path="/verify/:code" element={<Suspense fallback={null}><Verify /></Suspense>} />
         <Route path="/careers/:jobId" element={<Suspense fallback={null}><Careers /></Suspense>} />
         <Route element={<RequireAuth><Layout /></RequireAuth>}>

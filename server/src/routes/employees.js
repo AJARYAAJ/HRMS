@@ -219,7 +219,7 @@ const EDITABLE = [
   'emp_code', 'first_name', 'last_name', 'email', 'phone', 'role', 'department_id', 'designation_id', 'location_id',
   'shift_id', 'manager_id', 'date_of_joining', 'date_of_birth', 'gender', 'marital_status', 'blood_group',
   'employment_type', 'status', 'address', 'emergency_contact', 'pan', 'uan', 'bank_name', 'bank_account', 'ifsc', 'annual_ctc',
-  'company_id', 'probation_end_date', 'confirmation_status', 'tax_regime',
+  'company_id', 'probation_end_date', 'confirmation_status', 'tax_regime', 'buddy_id',
 ];
 
 function nextEmpCode() {
@@ -249,8 +249,23 @@ export const OFFBOARDING_TEMPLATE = [
   ['Issue relieving & experience letter', 'HR', 30],
 ];
 
-export function createTasks(employeeId, type, baseDate) {
-  const template = type === 'onboarding' ? ONBOARDING_TEMPLATE : OFFBOARDING_TEMPLATE;
+/**
+ * The checklist template for an employee: the one asked for, else the template set for their department, else the
+ * default of that type, else the built-in list.
+ */
+export function templateFor(employeeId, type, templateId = null) {
+  const dept = get('SELECT department_id FROM employees WHERE id = ?', employeeId)?.department_id;
+  return (templateId && get('SELECT * FROM onboarding_templates WHERE id = ? AND type = ?', templateId, type))
+    || (dept && get('SELECT * FROM onboarding_templates WHERE department_id = ? AND type = ? ORDER BY id LIMIT 1', dept, type))
+    || get('SELECT * FROM onboarding_templates WHERE type = ? ORDER BY is_default DESC, id LIMIT 1', type)
+    || null;
+}
+
+export function createTasks(employeeId, type, baseDate, templateId = null) {
+  const tpl = templateFor(employeeId, type, templateId);
+  const template = tpl
+    ? all('SELECT title, category, offset_days FROM onboarding_template_tasks WHERE template_id = ? ORDER BY sort, id', tpl.id).map((t) => [t.title, t.category, t.offset_days])
+    : type === 'onboarding' ? ONBOARDING_TEMPLATE : OFFBOARDING_TEMPLATE;
   const base = new Date(baseDate || today());
   for (const [title, category, offset] of template) {
     const d = new Date(base);
@@ -280,7 +295,7 @@ export function createEmployee(body, actorId) {
   return tx(() => {
     const id = insert('employees', data);
     ensureLeaveBalances(id);
-    createTasks(id, 'onboarding', data.date_of_joining);
+    createTasks(id, 'onboarding', data.date_of_joining, body.template_id || null);
     if (data.manager_id) notify(data.manager_id, 'New team member', `${data.first_name} ${data.last_name} joins your team on ${data.date_of_joining}`, `/employees/${id}`);
     notify(id, 'Welcome to PeopleHub!', 'Complete your profile and onboarding checklist.', '/onboarding', { email: false });
     emailEmployee(id, {

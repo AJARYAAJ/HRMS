@@ -100,6 +100,30 @@ export function seed({ reset = true } = {}) {
     for (const [k, v] of Object.entries(settings)) run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', k, v);
 
     const dept = Object.fromEntries(DEPARTMENTS.map(([name, code, description]) => [name, insert('departments', { name, code, description })]));
+    // Onboarding / offboarding checklists: a default per type plus one tailored to Engineering.
+    const template = (name, type, tasks, o = {}) => {
+      const id = insert('onboarding_templates', { name, type, ...o });
+      tasks.forEach(([title, category, offset_days], sort) => insert('onboarding_template_tasks', { template_id: id, title, category, offset_days, sort }));
+      return id;
+    };
+    const baseOnboarding = [
+      ['Send offer letter & collect signed copy', 'HR', -7], ['Verify pre-boarding documents', 'HR', -3],
+      ['Provision laptop & accessories', 'IT', 0], ['Create email, Slack and SSO accounts', 'IT', 0],
+      ['Welcome session and office tour', 'Buddy', 0], ['Complete your profile and bank details', 'Employee', 1],
+      ['Read and acknowledge company policies', 'Employee', 3], ['Team introduction and first 1:1', 'Manager', 1],
+      ['Complete POSH & information security training', 'Learning', 7], ['Set 30-60-90 day goals', 'Manager', 14],
+      ['30-day check-in', 'Manager', 30], ['Probation review', 'Manager', 90],
+    ];
+    template('Standard onboarding', 'onboarding', baseOnboarding, { is_default: 1 });
+    template('Engineering onboarding', 'onboarding', [
+      ...baseOnboarding.slice(0, 5), ['Set up development environment', 'Employee', 1], ['Codebase walkthrough', 'Buddy', 2],
+      ['First pull request merged', 'Employee', 10], ...baseOnboarding.slice(5),
+    ], { department_id: dept.Engineering });
+    template('Standard offboarding', 'offboarding', [
+      ['Accept resignation & confirm last working day', 'HR', 0], ['Knowledge transfer to team', 'Manager', 7],
+      ['Recover laptop and company assets', 'IT', 0], ['Revoke system access', 'IT', 0], ['Exit interview', 'HR', 0],
+      ['Full & final settlement', 'Finance', 30], ['Issue relieving & experience letter', 'HR', 30],
+    ], { is_default: 1 });
     const desig = Object.fromEntries(DESIGNATIONS.map(([title, level]) => [title, insert('designations', { title, level })]));
     // Office coordinates drive geofenced clock-in (Remote has none).
     const COORDS = { 'Bengaluru HQ': [12.9256, 77.6762], 'Mumbai Office': [19.0660, 72.8691], 'Pune Office': [18.5913, 73.7389] };
@@ -596,6 +620,40 @@ export function seed({ reset = true } = {}) {
     insert('asset_requests', { employee_id: emp, category: 'Monitor', reason: 'Second screen for code reviews', needed_by: ymd(addDays(today, 10)), status: 'pending' });
     const reqBy = emps.find((x) => x.dept === 'Design' && x.id !== emp) || emps[5];
     insert('asset_requests', { employee_id: reqBy.id, category: 'Accessory', reason: 'Drawing tablet for illustrations', status: 'approved', approver_id: hr });
+
+    // ---------- buddies and pre-boarding ----------
+    for (const e of emps.filter((x) => x.date_of_joining >= ymd(addDays(today, -60)))) {
+      const peer = emps.find((x) => x.dept === e.dept && x.id !== e.id && x.date_of_joining < ymd(addDays(today, -365)) && x.role === 'employee');
+      if (peer) run('UPDATE employees SET buddy_id = ? WHERE id = ?', peer.id, e.id);
+    }
+    const tokenHash = () => crypto.createHash('sha256').update(crypto.randomBytes(24)).digest('hex');
+    const engPeer = emps.find((x) => x.dept === 'Engineering' && x.role === 'employee' && x.id !== emp);
+    insert('preboarding', {
+      name: 'Rhea Kapoor', email: 'rhea.kapoor@example.com', phone: '+91 98450 11223', designation_id: desig['Software Engineer'], department_id: dept.Engineering,
+      location_id: loc[0], manager_id: engMgr, buddy_id: engPeer?.id ?? null, date_of_joining: ymd(addDays(today, 14)), annual_ctc: 1400000,
+      token_hash: tokenHash(), expires_at: new Date(Date.now() + 30 * 86400000).toISOString(), status: 'invited', created_by: hr,
+    });
+    const kabir = insert('preboarding', {
+      name: 'Kabir Malhotra', email: 'kabir.malhotra@example.com', phone: '+91 99001 44556', designation_id: desig['Product Manager'] ?? null, department_id: dept.Product,
+      location_id: loc[0], manager_id: heads.Product ?? engMgr, date_of_joining: ymd(addDays(today, 5)), annual_ctc: 2200000,
+      token_hash: tokenHash(), expires_at: new Date(Date.now() + 30 * 86400000).toISOString(), status: 'submitted', created_by: hr,
+      submitted_at: new Date(Date.now() - 86400000).toISOString(), offer_accepted_at: new Date(Date.now() - 2 * 86400000).toISOString(), offer_signature: 'Kabir Malhotra · 203.0.113.7',
+      details: JSON.stringify({
+        personal: { date_of_birth: '1994-06-12', gender: 'Male', marital_status: 'Married', blood_group: 'B+', phone: '+91 99001 44556', personal_email: 'kabir.m@example.com' },
+        address: { current: '12, 4th Cross, Indiranagar, Bengaluru 560038', permanent: '12, 4th Cross, Indiranagar, Bengaluru 560038' },
+        emergency: { name: 'Sara Malhotra', relation: 'Spouse', phone: '+91 99001 77889' },
+        bank: { bank_name: 'HDFC Bank', account: '50100234567890', ifsc: 'HDFC0000123', pan: 'ABKPM1234K', uan: '' },
+        family: [{ name: 'Sara Malhotra', relation: 'Spouse', date_of_birth: '1995-02-20' }],
+      }),
+    });
+    const PNG1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+    for (const [type, label] of [['photo', 'photo.png'], ['pan', 'pan.pdf'], ['aadhaar', 'aadhaar.pdf'], ['education', 'degree.pdf'], ['experience', 'relieving-letter.pdf'], ['bank_proof', 'cancelled-cheque.pdf']]) {
+      const isPng = label.endsWith('.png');
+      const data = isPng ? PNG1 : buildPdf({ title: label.replace('.pdf', '').replace('-', ' '), company: 'Sample document', body: 'Sample document uploaded during pre-boarding (demo data).' });
+      const stored = `${crypto.randomUUID()}${isPng ? '.png' : '.pdf'}`;
+      fs.writeFileSync(path.join(UPLOAD_DIR, stored), data);
+      insert('preboarding_documents', { preboarding_id: kabir, doc_type: type, stored_name: stored, original_name: label, mime_type: isPng ? 'image/png' : 'application/pdf', size: data.length, status: 'pending' });
+    }
 
     // ---------- helpdesk ----------
     const ticketSpecs = [['IT', 'VPN keeps disconnecting', 'high'], ['Payroll', 'Discrepancy in last month TDS', 'medium'], ['HR', 'Need address proof letter', 'low'],

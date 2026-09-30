@@ -34,6 +34,9 @@ export function migrate() {
   addColumn('holidays', 'list_id', 'INTEGER');     // NULL = the default holiday list
   addColumn('leave_balances', 'adjustment', 'REAL NOT NULL DEFAULT 0'); // comp-offs, penalties, manual corrections
   addColumn('employees', 'photo_file', 'TEXT');
+  addColumn('employees', 'buddy_id', 'INTEGER');
+  addColumn('onboarding_tasks', 'done_at', 'TEXT');
+  addColumn('onboarding_tasks', 'done_by', 'INTEGER');
   addColumn('assets', 'warranty_until', 'TEXT');
   addColumn('assets', 'condition', "TEXT DEFAULT 'good'");
   addColumn('assets', 'notes', 'TEXT');

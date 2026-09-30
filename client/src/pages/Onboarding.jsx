@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useMemo } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { PreboardingTab, TemplatesTab, MyOnboarding } from './OnboardingHub';
 import { UserPlus, UserMinus, CheckCircle2, Circle, Plus } from 'lucide-react';
 import { useGet, useAction, useAuth, useDisclosure } from '../lib/hooks';
 import { PageHeader, Tabs, Avatar, Progress, Badge, CardSkeleton, EmptyState, cx } from '../components/ui';
@@ -7,9 +8,13 @@ import { FormModal } from '../components/Form';
 import { date, shortDate, todayStr } from '../lib/format';
 
 export default function Onboarding() {
-  const { isHR } = useAuth();
-  const [type, setType] = useState('onboarding');
-  const { data = [], isLoading } = useGet('onboarding', { type });
+  const { isHR, isManager } = useAuth();
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') || (isHR ? 'onboarding' : 'mine');
+  const type = tab === 'offboarding' ? 'offboarding' : 'onboarding';
+  const setType = (t) => setParams(t === (isHR ? 'onboarding' : 'mine') ? {} : { tab: t });
+  const checklistTab = ['onboarding', 'offboarding'].includes(tab);
+  const { data = [], isLoading } = useGet(checklistTab ? 'onboarding' : null, { type });
   const [act] = useAction();
   const add = useDisclosure();
   const groups = useMemo(() => {
@@ -25,8 +30,15 @@ export default function Onboarding() {
     <div>
       <PageHeader icon={UserPlus} title="Onboarding & offboarding" subtitle="Structured checklists from offer to first 90 days — and a smooth exit"
         actions={isHR && <button className="btn-primary" onClick={() => add.onOpen()}><Plus size={16} /> Add task</button>} />
-      <Tabs value={type} onChange={setType} tabs={[{ value: 'onboarding', label: 'Onboarding' }, { value: 'offboarding', label: 'Offboarding' }]} />
-      {isLoading ? <div className="grid gap-4 lg:grid-cols-2"><CardSkeleton lines={6} /><CardSkeleton lines={6} /></div> : groups.length === 0 ? (
+      <Tabs value={tab} onChange={setType} tabs={[
+        ...(isHR ? [] : [{ value: 'mine', label: 'My onboarding' }]),
+        ...(isHR || isManager ? [{ value: 'onboarding', label: 'Onboarding' }, { value: 'offboarding', label: 'Offboarding' }] : []),
+        ...(isHR ? [{ value: 'preboarding', label: 'Pre-boarding' }, { value: 'templates', label: 'Checklist templates' }] : []),
+      ]} />
+      {tab === 'mine' && <MyOnboarding />}
+      {tab === 'preboarding' && isHR && <PreboardingTab />}
+      {tab === 'templates' && isHR && <TemplatesTab />}
+      {!checklistTab ? null : isLoading ? <div className="grid gap-4 lg:grid-cols-2"><CardSkeleton lines={6} /><CardSkeleton lines={6} /></div> : groups.length === 0 ? (
         <div className="card"><EmptyState icon={type === 'onboarding' ? UserPlus : UserMinus} title={`No active ${type}`} message={type === 'onboarding' ? 'New hires get a checklist automatically.' : 'Checklists are created when HR initiates an exit.'} /></div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">

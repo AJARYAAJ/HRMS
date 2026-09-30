@@ -136,7 +136,7 @@ onboardingRouter.put('/:id', (req, res) => {
   const task = get('SELECT * FROM onboarding_tasks WHERE id = ?', req.params.id);
   if (!task) throw httpError(404, 'Task not found');
   if (!isHR(req.user) && task.employee_id !== req.user.id && !canManage(req.user, task.employee_id)) throw httpError(403, 'Not allowed');
-  update('onboarding_tasks', task.id, { done: req.body.done ? 1 : 0 });
+  update('onboarding_tasks', task.id, { done: req.body.done ? 1 : 0, done_at: req.body.done ? new Date().toISOString() : null, done_by: req.body.done ? req.user.id : null });
   const pending = get("SELECT COUNT(*) AS n FROM onboarding_tasks WHERE employee_id = ? AND type = ? AND done = 0", task.employee_id, task.type).n;
   if (task.type === 'offboarding' && pending === 0) update('employees', task.employee_id, { status: 'exited' });
   res.json(get('SELECT * FROM onboarding_tasks WHERE id = ?', task.id));

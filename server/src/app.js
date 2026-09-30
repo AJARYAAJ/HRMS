@@ -22,6 +22,7 @@ import { analyticsRouter } from './routes/analytics.js';
 import { policiesRouter } from './routes/policies.js';
 import { idCardsRouter, publicVerifyRouter } from './routes/idcards.js';
 import { assetsRouter, assetRequestsRouter } from './routes/assets.js';
+import { preboardingRouter, joinRouter, onboardingTemplatesRouter, myOnboarding, setBuddy } from './routes/preboarding.js';
 import { workRouter, travelRouter } from './routes/work.js';
 import { agentRouter, activityRouter } from './routes/activity.js';
 import { hrdocsRouter, lettersRouter, letterRequestsRouter, customFieldsRouter, kbRouter } from './routes/hrdocs.js';
@@ -53,6 +54,7 @@ export function createApp() {
   api.use('/agent', agentRouter); // desktop activity agent (device-token auth)
   api.use('/agent-downloads', agentDownloadsRouter); // public agent builds and installers
   api.use('/public', publicVerifyRouter); // ID card verification (QR code)
+  api.use('/join', joinRouter); // pre-boarding portal for new hires (token link)
   api.use(authenticate);
   api.use('/auth', authRouter);
   api.use('/employees', employeesRouter);
@@ -83,6 +85,10 @@ export function createApp() {
   api.use('/analytics', analyticsRouter);
   api.use('/policies', policiesRouter);
   api.use('/id-cards', idCardsRouter);
+  api.use('/preboarding', preboardingRouter);
+  api.use('/onboarding-templates', onboardingTemplatesRouter);
+  api.get('/onboarding/my', myOnboarding);
+  api.post('/onboarding/buddy', setBuddy);
   api.use('/timesheets', m.timesheetsRouter);
   api.use('/assets', assetsRouter);
   api.use('/asset-requests', assetRequestsRouter);

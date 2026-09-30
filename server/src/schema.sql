@@ -1046,3 +1046,62 @@ CREATE TABLE IF NOT EXISTS asset_requests (
   asset_id INTEGER REFERENCES assets(id) ON DELETE SET NULL,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- ---------- pre-boarding and onboarding templates ----------
+CREATE TABLE IF NOT EXISTS onboarding_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  type TEXT NOT NULL DEFAULT 'onboarding',       -- onboarding | offboarding
+  department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL,  -- used automatically for this department
+  is_default INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS onboarding_template_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_id INTEGER NOT NULL REFERENCES onboarding_templates(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'HR',           -- owner: HR | IT | Manager | Buddy | Employee | Finance | Learning
+  offset_days INTEGER NOT NULL DEFAULT 0,        -- relative to the joining (or last) day
+  sort INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS preboarding (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  candidate_id INTEGER REFERENCES candidates(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT,
+  designation_id INTEGER REFERENCES designations(id) ON DELETE SET NULL,
+  department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+  location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+  manager_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  buddy_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  template_id INTEGER REFERENCES onboarding_templates(id) ON DELETE SET NULL,
+  date_of_joining TEXT NOT NULL,
+  annual_ctc REAL,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'invited',        -- invited | in_progress | submitted | converted | cancelled
+  details TEXT,                                  -- JSON: personal, address, family, bank, emergency
+  offer_accepted_at TEXT,
+  offer_signature TEXT,
+  employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  created_by INTEGER,
+  created_at TEXT DEFAULT (datetime('now')),
+  submitted_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS preboarding_documents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  preboarding_id INTEGER NOT NULL REFERENCES preboarding(id) ON DELETE CASCADE,
+  doc_type TEXT NOT NULL,
+  stored_name TEXT NOT NULL,
+  original_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',        -- pending | verified | rejected
+  note TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(preboarding_id, doc_type)
+);

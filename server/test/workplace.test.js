@@ -140,3 +140,91 @@ test('exit: unreturned assets are recovered at cost in the full & final settleme
   assert.equal(after.asset_recovery, 0);
   assert.equal(Math.round(after.net_payable - before.net_payable), Math.round(held));
 });
+
+test('pre-boarding: invite → portal details, documents, e-signed offer → HR review → convert to employee', async () => {
+  const eng = get("SELECT id FROM departments WHERE name = 'Engineering'").id;
+  const buddy = get("SELECT id FROM employees WHERE email = 'employee@peoplehub.demo'").id;
+  const body = { name: 'Meenal Joshi', email: 'meenal.joshi@example.com', date_of_joining: '2030-01-06', department_id: eng, manager_id: 3, buddy_id: buddy, annual_ctc: 1500000 };
+  assert.equal((await call('employee', 'POST', 'preboarding', body)).status, 403);
+  const inv = await call('hr', 'POST', 'preboarding', body);
+  assert.equal(inv.status, 201);
+  assert.ok(!('token_hash' in inv.body));
+  const token = inv.body.portal_url.split('/join/')[1];
+  assert.equal((await call('hr', 'POST', 'preboarding', body)).status, 409);
+  assert.equal((await call(null, 'GET', 'join/not-a-real-token')).status, 404);
+
+  const portal = (await call(null, 'GET', `join/${token}`)).body;
+  assert.equal(portal.name, 'Meenal Joshi');
+  assert.ok(portal.progress.blockers.length > 5);
+  assert.equal((await call(null, 'PUT', `join/${token}/details`, { bank: { pan: 'BAD' } })).status, 400);
+  await call(null, 'PUT', `join/${token}/details`, {
+    personal: { date_of_birth: '1996-03-02', gender: 'Female', phone: '+91 90000 11111', blood_group: 'A+' },
+    address: { current: 'HSR Layout, Bengaluru' }, emergency: { name: 'Anil Joshi', relation: 'Father', phone: '+91 90000 22222' },
+    bank: { bank_name: 'ICICI Bank', account: '123456789012', ifsc: 'ICIC0001234', pan: 'ABCPJ1234K' },
+  });
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj << >> endobj\ntrailer << >>\n%%EOF\n');
+  assert.equal((await call(null, 'POST', `join/${token}/documents`, fileForm(pdf, 'application/pdf', 'photo.pdf', { doc_type: 'photo' }))).status, 415);
+  assert.equal((await call(null, 'POST', `join/${token}/documents`, fileForm(PNG, 'image/png', 'me.png', { doc_type: 'photo' }))).status, 201);
+  for (const t of ['pan', 'aadhaar', 'education', 'bank_proof']) {
+    assert.equal((await call(null, 'POST', `join/${token}/documents`, fileForm(pdf, 'application/pdf', `${t}.pdf`, { doc_type: t }))).status, 201);
+  }
+  const early = await call(null, 'POST', `join/${token}/submit`);
+  assert.equal(early.status, 400);
+  assert.match(early.body.error, /Offer acceptance/);
+  assert.equal((await call(null, 'POST', `join/${token}/accept-offer`, { signature: 'M Joshi' })).status, 400);
+  assert.ok((await call(null, 'POST', `join/${token}/accept-offer`, { signature: 'meenal  joshi' })).body.offer_accepted_at);
+  assert.equal((await call(null, 'POST', `join/${token}/submit`)).body.status, 'submitted');
+  assert.equal((await call(null, 'PUT', `join/${token}/details`, { address: { current: 'x' } })).status, 400); // locked after submit
+
+  const id = inv.body.id;
+  let rec = (await call('hr', 'GET', `preboarding/${id}`)).body;
+  assert.equal((await call('hr', 'POST', `preboarding/${id}/convert`)).status, 400); // documents not verified
+  const aadhaar = rec.documents.find((d) => d.doc_type === 'aadhaar');
+  assert.equal((await call('hr', 'PUT', `preboarding/${id}/documents/${aadhaar.id}`, { status: 'rejected' })).status, 400); // needs a note
+  rec = (await call('hr', 'PUT', `preboarding/${id}/documents/${aadhaar.id}`, { status: 'rejected', note: 'Back side missing' })).body;
+  assert.equal(rec.status, 'in_progress');
+  assert.equal((await call(null, 'POST', `join/${token}/documents`, fileForm(pdf, 'application/pdf', 'aadhaar-both.pdf', { doc_type: 'aadhaar' }))).status, 201);
+  assert.equal((await call(null, 'POST', `join/${token}/submit`)).status, 200);
+  rec = (await call('hr', 'GET', `preboarding/${id}`)).body;
+  for (const d of rec.documents) await call('hr', 'PUT', `preboarding/${id}/documents/${d.id}`, { status: 'verified' });
+  const dl = await call('hr', 'GET', `preboarding/${id}/documents/${rec.documents[1].id}/download`);
+  assert.equal(dl.status, 200);
+
+  const conv = await call('hr', 'POST', `preboarding/${id}/convert`);
+  assert.equal(conv.status, 201);
+  const emp = get('SELECT * FROM employees WHERE id = ?', conv.body.employee_id);
+  assert.deepEqual([emp.pan, emp.ifsc, emp.buddy_id, emp.blood_group, emp.department_id], ['ABCPJ1234K', 'ICIC0001234', buddy, 'A+', eng]);
+  assert.ok(emp.photo_file);
+  assert.match(emp.emergency_contact, /Anil Joshi \(Father\)/);
+  const tasks = get("SELECT group_concat(title, '|') AS t FROM onboarding_tasks WHERE employee_id = ?", emp.id).t;
+  assert.match(tasks, /Set up development environment/); // Engineering template
+  assert.equal(get("SELECT COUNT(*) AS n FROM documents WHERE employee_id = ? AND category = 'Personal'", emp.id).n, 5);
+  assert.equal((await call(null, 'GET', `join/${token}`)).body.status, 'converted');
+  assert.equal((await call(null, 'POST', `join/${token}/submit`)).status, 400);
+
+  tokens.joiner = (await call(null, 'POST', 'auth/login', { email: 'meenal.joshi@example.com', password: 'Welcome@123' })).body.token;
+  const my = (await call('joiner', 'GET', 'onboarding/my')).body;
+  assert.equal(my.employee.buddy_name, 'Ananya Iyer');
+  assert.ok(my.tasks.length >= 10 && my.done === 0);
+  assert.equal((await call('joiner', 'GET', `onboarding/my?employee_id=4`)).status, 403);
+});
+
+test('onboarding templates: department-specific checklists, default rules and buddy assignment', async () => {
+  const sales = get("SELECT id FROM departments WHERE name = 'Sales'").id;
+  assert.equal((await call('employee', 'POST', 'onboarding-templates', { name: 'X' })).status, 403);
+  assert.equal((await call('hr', 'POST', 'onboarding-templates', { name: 'Sales onboarding', tasks: [{ title: '' }] })).status, 400);
+  const t = await call('hr', 'POST', 'onboarding-templates', {
+    name: 'Sales onboarding', type: 'onboarding', department_id: sales,
+    tasks: [{ title: 'CRM access', category: 'IT', offset_days: 0 }, { title: 'Shadow three client calls', category: 'Buddy', offset_days: 5 }],
+  });
+  assert.equal(t.status, 201);
+  const newbie = await call('hr', 'POST', 'employees', { first_name: 'Tara', last_name: 'Sen', email: 'tara.sen@example.com', department_id: sales, date_of_joining: '2030-02-01' });
+  const titles = get("SELECT group_concat(title, '|') AS t FROM onboarding_tasks WHERE employee_id = ?", newbie.body.id).t;
+  assert.equal(titles, 'CRM access|Shadow three client calls');
+  const std = (await call('hr', 'GET', 'onboarding-templates')).body.find((x) => x.name === 'Standard onboarding');
+  assert.equal((await call('hr', 'DELETE', `onboarding-templates/${std.id}`)).status, 409);
+  assert.equal((await call('employee', 'POST', 'onboarding/buddy', { employee_id: newbie.body.id, buddy_id: 4 })).status, 403);
+  assert.equal((await call('hr', 'POST', 'onboarding/buddy', { employee_id: newbie.body.id, buddy_id: newbie.body.id })).status, 400);
+  assert.equal((await call('hr', 'POST', 'onboarding/buddy', { employee_id: newbie.body.id, buddy_id: 4 })).status, 200);
+  assert.equal(get('SELECT buddy_id FROM employees WHERE id = ?', newbie.body.id).buddy_id, 4);
+});

@@ -17,12 +17,13 @@ export const DEFAULT_FLOWS = {
   loans: 'manager_hr',
   resignations: 'manager_hr',
   tax_declarations: 'hr',
+  asset_requests: 'manager_hr',
 };
 
 export const FLOW_LABELS = {
   leave_requests: 'Leave requests', regularizations: 'Attendance regularization', attendance_requests: 'WFH / on-duty / comp-off / overtime',
   timesheets: 'Timesheets', expenses: 'Expense claims', travel_requests: 'Travel requests', loans: 'Loans & salary advances',
-  resignations: 'Resignations', tax_declarations: 'Tax declarations',
+  resignations: 'Resignations', tax_declarations: 'Tax declarations', asset_requests: 'Asset requests',
 };
 
 export function approvalFlows() {

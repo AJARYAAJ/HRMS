@@ -34,6 +34,12 @@ export function migrate() {
   addColumn('holidays', 'list_id', 'INTEGER');     // NULL = the default holiday list
   addColumn('leave_balances', 'adjustment', 'REAL NOT NULL DEFAULT 0'); // comp-offs, penalties, manual corrections
   addColumn('employees', 'photo_file', 'TEXT');
+  addColumn('assets', 'warranty_until', 'TEXT');
+  addColumn('assets', 'condition', "TEXT DEFAULT 'good'");
+  addColumn('assets', 'notes', 'TEXT');
+  addColumn('assets', 'assigned_on', 'TEXT');
+  addColumn('assets', 'acknowledged_at', 'TEXT');
+  addColumn('fnf_settlements', 'asset_recovery', 'REAL DEFAULT 0');
   addColumn('employees', 'photo_type', 'TEXT');
   addColumn('leave_balances', 'carried', 'REAL NOT NULL DEFAULT 0');    // carried forward from the previous year
   addColumn('expenses', 'distance_km', 'REAL');

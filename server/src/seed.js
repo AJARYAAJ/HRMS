@@ -575,12 +575,27 @@ export function seed({ reset = true } = {}) {
     let tag = 1;
     for (const e of emps) {
       const [name, category, cost] = e.dept === 'Engineering' || e.dept === 'Design' ? assetSpecs[0] : assetSpecs[1];
-      insert('assets', { asset_tag: `AST-${String(tag++).padStart(4, '0')}`, name, category, serial_no: `SN${between(100000, 999999)}`, assigned_to: e.id, status: 'assigned', purchase_date: e.date_of_joining, cost });
+      const bought = e.date_of_joining;
+      const warranty = ymd(addDays(new Date(`${bought}T00:00:00`), 3 * 365));
+      // The demo employee's laptop is waiting for their acknowledgement; everyone else has confirmed receipt.
+      const ack = e.id === emp ? null : `${bought}T10:00:00.000Z`;
+      const id = insert('assets', { asset_tag: `AST-${String(tag++).padStart(4, '0')}`, name, category, serial_no: `SN${between(100000, 999999)}`, assigned_to: e.id, status: 'assigned',
+        purchase_date: bought, cost, warranty_until: warranty, condition: 'good', assigned_on: bought, acknowledged_at: ack });
+      insert('asset_history', { asset_id: id, action: 'created', by_id: hr, condition: 'new', created_at: `${bought} 09:00:00` });
+      insert('asset_history', { asset_id: id, action: 'assigned', employee_id: e.id, by_id: hr, condition: 'new', created_at: `${bought} 09:30:00` });
+      if (ack) insert('asset_history', { asset_id: id, action: 'acknowledged', employee_id: e.id, by_id: e.id, created_at: `${bought} 10:00:00` });
     }
     for (let i = 0; i < 12; i++) {
       const [name, category, cost] = pick(assetSpecs);
-      insert('assets', { asset_tag: `AST-${String(tag++).padStart(4, '0')}`, name, category, serial_no: `SN${between(100000, 999999)}`, assigned_to: null, status: pick(['available', 'available', 'in_repair']), purchase_date: ymd(addDays(today, -between(30, 700))), cost });
+      const bought = ymd(addDays(today, -between(30, 1000)));
+      const status = pick(['available', 'available', 'in_repair']);
+      const id = insert('assets', { asset_tag: `AST-${String(tag++).padStart(4, '0')}`, name, category, serial_no: `SN${between(100000, 999999)}`, assigned_to: null, status,
+        purchase_date: bought, cost, warranty_until: ymd(addDays(new Date(`${bought}T00:00:00`), (category === 'Laptop' ? 3 : 1) * 365)), condition: status === 'in_repair' ? 'damaged' : 'good' });
+      insert('asset_history', { asset_id: id, action: 'created', by_id: hr, condition: 'new', created_at: `${bought} 09:00:00` });
     }
+    insert('asset_requests', { employee_id: emp, category: 'Monitor', reason: 'Second screen for code reviews', needed_by: ymd(addDays(today, 10)), status: 'pending' });
+    const reqBy = emps.find((x) => x.dept === 'Design' && x.id !== emp) || emps[5];
+    insert('asset_requests', { employee_id: reqBy.id, category: 'Accessory', reason: 'Drawing tablet for illustrations', status: 'approved', approver_id: hr });
 
     // ---------- helpdesk ----------
     const ticketSpecs = [['IT', 'VPN keeps disconnecting', 'high'], ['Payroll', 'Discrepancy in last month TDS', 'medium'], ['HR', 'Need address proof letter', 'low'],

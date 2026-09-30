@@ -86,3 +86,57 @@ test('ID card verification is public, tamper-proof and reflects employment statu
   assert.deepEqual([ex.valid, ex.current], [true, false]);
   run('UPDATE employees SET photo_file = NULL WHERE id = 4');
 });
+
+test('assets: assign → acknowledge → return with condition, history and guard rails', async () => {
+  const created = await call('hr', 'POST', 'assets', { asset_tag: 'AST-T1', name: 'ThinkPad X1', category: 'Laptop', cost: 150000, warranty_until: '2029-01-01', condition: 'new' });
+  assert.equal(created.status, 201);
+  const id = created.body.id;
+  assert.equal((await call('hr', 'POST', 'assets', { asset_tag: 'ast-t1', name: 'Dup' })).status, 409);
+  assert.equal((await call('hr', 'PUT', `assets/${id}`, { status: 'assigned' })).status, 400); // must use Assign
+  assert.equal((await call('employee', 'POST', `assets/${id}/assign`, { employee_id: 4 })).status, 403);
+  const a = await call('hr', 'POST', `assets/${id}/assign`, { employee_id: 4, note: 'New joiner kit' });
+  assert.equal(a.body.status, 'assigned');
+  assert.equal((await call('hr', 'POST', `assets/${id}/assign`, { employee_id: 3 })).status, 409);
+  assert.equal((await call('manager', 'POST', `assets/${id}/acknowledge`)).status, 404); // not theirs
+  const mine = (await call('employee', 'GET', 'assets?mine=1')).body.find((x) => x.id === id);
+  assert.equal(mine.acknowledged_at, null);
+  assert.equal((await call('employee', 'POST', `assets/${id}/acknowledge`, {})).status, 200);
+  assert.equal((await call('employee', 'POST', `assets/${id}/acknowledge`, {})).status, 400);
+  const ret = await call('hr', 'POST', `assets/${id}/return`, { condition: 'damaged', note: 'Cracked hinge' });
+  assert.deepEqual([ret.body.status, ret.body.assigned_to, ret.body.condition], ['in_repair', null, 'damaged']);
+  const hist = (await call('hr', 'GET', `assets/${id}/history`)).body.map((h) => h.action);
+  assert.deepEqual(hist, ['returned', 'acknowledged', 'assigned', 'created']);
+  assert.equal((await call('employee', 'GET', `assets/${id}/history`)).status, 403); // no longer theirs
+  const sum = (await call('hr', 'GET', 'assets/summary')).body;
+  assert.ok(sum.total > 0 && sum.unacknowledged >= 1);
+});
+
+test('asset requests: manager → HR approval, fulfilled by assigning an asset', async () => {
+  const req = await call('employee', 'POST', 'asset-requests', { category: 'Mobile', reason: 'On-call rotation' });
+  assert.equal(req.status, 201);
+  assert.equal((await call('employee', 'POST', 'asset-requests', { category: 'Mobile' })).status, 400);
+  assert.equal((await call('manager', 'PUT', `asset-requests/${req.body.id}/decision`, { status: 'approved' })).body.status, 'manager_approved');
+  const approvals = (await call('hr', 'GET', 'approvals')).body;
+  assert.ok((approvals.items || approvals).some((i) => i.type === 'asset' && i.id === req.body.id));
+  assert.equal((await call('hr', 'PUT', `asset-requests/${req.body.id}/decision`, { status: 'approved' })).body.status, 'approved');
+  const phone = (await call('hr', 'POST', 'assets', { asset_tag: 'AST-T2', name: 'Pixel 9', category: 'Mobile', cost: 60000 })).body;
+  assert.equal((await call('hr', 'POST', `assets/${phone.id}/assign`, { employee_id: 3, request_id: req.body.id })).status, 400); // wrong person
+  assert.equal((await call('hr', 'POST', `assets/${phone.id}/assign`, { employee_id: 4, request_id: req.body.id })).status, 200);
+  const r = (await call('employee', 'GET', 'asset-requests?mine=1')).body.find((x) => x.id === req.body.id);
+  assert.deepEqual([r.status, r.asset_tag], ['fulfilled', 'AST-T2']);
+});
+
+test('exit: unreturned assets are recovered at cost in the full & final settlement', async () => {
+  const leaver = get("SELECT id FROM employees WHERE status = 'on_notice' LIMIT 1").id;
+  run("UPDATE employees SET exit_date = date('now', '+10 day') WHERE id = ?", leaver);
+  const held = get("SELECT COALESCE(SUM(cost), 0) AS c FROM assets WHERE assigned_to = ? AND status = 'assigned'", leaver).c;
+  assert.ok(held > 0);
+  const before = (await call('hr', 'GET', `exit/fnf/preview/${leaver}`)).body;
+  assert.equal(before.asset_recovery, held);
+  assert.ok(before.unreturned_assets.length >= 1);
+  assert.ok((await call('hr', 'GET', 'assets/summary')).body.exit_returns.some((x) => x.employee_id === leaver));
+  for (const a of before.unreturned_assets) await call('hr', 'POST', `assets/${a.id}/return`, { condition: 'good' });
+  const after = (await call('hr', 'GET', `exit/fnf/preview/${leaver}`)).body;
+  assert.equal(after.asset_recovery, 0);
+  assert.equal(Math.round(after.net_payable - before.net_payable), Math.round(held));
+});

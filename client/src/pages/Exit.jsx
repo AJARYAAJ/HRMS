@@ -35,6 +35,7 @@ function FnfBreakdown({ f }) {
     ['Bonus / incentives', '', f.bonus, 1],
     ['Notice period recovery', f.notice_shortfall_days ? `${f.notice_shortfall_days} days short` : '', f.notice_recovery, -1],
     ['Loan / advance recovery', '', f.loan_recovery, -1],
+    ['Unreturned assets', f.unreturned_assets?.length ? f.unreturned_assets.map((a) => a.asset_tag).join(', ') : '', f.asset_recovery || 0, -1],
     ['Other deductions', '', f.other_deductions, -1],
   ];
   return (

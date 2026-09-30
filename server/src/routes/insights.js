@@ -55,6 +55,7 @@ const APPROVAL_TYPES = [
   { type: 'travel', table: 'travel_requests', summary: "t.from_city || ' → ' || t.to_city || ' · ' || t.depart_date || COALESCE(' · advance ₹' || NULLIF(t.advance_amount, 0), '')", detail: 't.purpose' },
   { type: 'loan', table: 'loans', summary: "(CASE t.type WHEN 'advance' THEN 'Salary advance' ELSE 'Loan' END) || ' · ₹' || t.amount || ' · ' || t.tenure_months || ' month(s)'", detail: 't.reason' },
   { type: 'resignation', table: 'resignations', summary: "'Resignation · requested last day ' || t.requested_lwd", detail: 't.reason' },
+  { type: 'asset', table: 'asset_requests', summary: "'Asset request · ' || t.category || COALESCE(' · needed by ' || t.needed_by, '')", detail: 't.reason' },
   { type: 'tax', table: 'tax_declarations', summary: "'Sec ' || t.section || ' · ₹' || t.amount || ' · FY ' || t.fy", detail: 't.description' },
 ];
 

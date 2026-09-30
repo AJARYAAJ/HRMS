@@ -3,6 +3,7 @@ import { all, get, insert, update, run, tx } from '../db.js';
 import { requireRole, isHR } from '../auth.js';
 import { crud } from '../crud.js';
 import { audit, httpError, notify, notifyHR, today, round2, ensureLeaveBalances } from '../utils.js';
+import { unreturnedAssets } from './assets.js';
 import { payrollSettings } from '../tax.js';
 import { createTasks } from './employees.js';
 
@@ -173,7 +174,7 @@ export function computeFnf(employeeId, { waiveNotice = false, bonus = 0, otherDe
 
   ensureLeaveBalances(employeeId, Number(lwd.slice(0, 4)));
   const el = get(
-    `SELECT b.allocated - b.used AS left FROM leave_balances b JOIN leave_types lt ON lt.id = b.leave_type_id
+    `SELECT b.allocated + b.carried + b.adjustment - b.used AS left FROM leave_balances b JOIN leave_types lt ON lt.id = b.leave_type_id
      WHERE b.employee_id = ? AND lt.code = 'EL' AND b.year = ?`, employeeId, Number(lwd.slice(0, 4)),
   );
   const encashDays = Math.max(0, el?.left || 0);
@@ -189,7 +190,10 @@ export function computeFnf(employeeId, { waiveNotice = false, bonus = 0, otherDe
   const noticeRecovery = (monthlyGross / 30) * shortfall;
 
   const loanRecovery = get("SELECT COALESCE(SUM(outstanding), 0) AS s FROM loans WHERE employee_id = ? AND status = 'approved'", employeeId).s;
-  const net = salaryAmount + encashAmount + gratuity + Number(bonus || 0) - noticeRecovery - loanRecovery - Number(otherDeductions || 0);
+  // Company assets not yet returned are recovered at cost; returning them before settlement removes the deduction.
+  const assets = unreturnedAssets(employeeId);
+  const assetRecovery = assets.reduce((a, x) => a + (x.cost || 0), 0);
+  const net = salaryAmount + encashAmount + gratuity + Number(bonus || 0) - noticeRecovery - loanRecovery - assetRecovery - Number(otherDeductions || 0);
 
   return {
     employee_id: employeeId, resignation_id: resignation?.id ?? null, last_working_day: lwd,
@@ -197,7 +201,7 @@ export function computeFnf(employeeId, { waiveNotice = false, bonus = 0, otherDe
     leave_encash_days: encashDays, leave_encash_amount: round2(encashAmount),
     service_years: round2(serviceYears), gratuity: round2(gratuity), bonus: round2(Number(bonus || 0)),
     notice_required_days: required, notice_served_days: served, notice_shortfall_days: shortfall, notice_recovery: round2(noticeRecovery),
-    loan_recovery: round2(loanRecovery), other_deductions: round2(Number(otherDeductions || 0)), net_payable: round2(net),
+    loan_recovery: round2(loanRecovery), asset_recovery: round2(assetRecovery), unreturned_assets: assets, other_deductions: round2(Number(otherDeductions || 0)), net_payable: round2(net),
   };
 }
 
@@ -229,7 +233,7 @@ exitRouter.post('/fnf', requireRole('admin', 'hr'), (req, res) => {
     employee_id: calc.employee_id, resignation_id: calc.resignation_id, last_working_day: calc.last_working_day,
     salary_days: calc.salary_days, salary_amount: calc.salary_amount, leave_encash_days: calc.leave_encash_days,
     leave_encash_amount: calc.leave_encash_amount, gratuity: calc.gratuity, bonus: calc.bonus,
-    notice_shortfall_days: calc.notice_shortfall_days, notice_recovery: calc.notice_recovery, loan_recovery: calc.loan_recovery,
+    notice_shortfall_days: calc.notice_shortfall_days, notice_recovery: calc.notice_recovery, loan_recovery: calc.loan_recovery, asset_recovery: calc.asset_recovery,
     other_deductions: calc.other_deductions, net_payable: calc.net_payable, notes: b.notes || null, created_by: req.user.id, status: 'draft',
   };
   const id = draft ? (update('fnf_settlements', draft.id, data), draft.id) : insert('fnf_settlements', data);

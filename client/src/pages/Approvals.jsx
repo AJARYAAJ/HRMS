@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { CheckSquare, Check, X, Plane, Clock, Receipt, Timer, Landmark, CheckCheck, Paperclip, Home, Luggage, HandCoins, LogOut, History } from 'lucide-react';
+import { CheckSquare, Check, X, Plane, Clock, Receipt, Timer, Landmark, CheckCheck, Paperclip, Home, Luggage, HandCoins, LogOut, History, Laptop } from 'lucide-react';
 import { useGet, useAction, useToast } from '../lib/hooks';
 import ApprovalTrail from '../components/ApprovalTrail';
 import { PageHeader, Tabs, Avatar, Badge, EmptyState, TableSkeleton, Modal } from '../components/ui';
@@ -15,6 +15,7 @@ const TYPES = {
   loan: { label: 'Loans', icon: HandCoins, path: (id) => `loans/${id}/decision`, entity: 'loans' },
   timesheet: { label: 'Timesheets', icon: Timer, path: (id) => `timesheets/${id}/decision`, entity: 'timesheets' },
   resignation: { label: 'Resignations', icon: LogOut, path: (id) => `resignations/${id}/decision`, entity: 'resignations' },
+  asset: { label: 'Assets', icon: Laptop, path: (id) => `asset-requests/${id}/decision`, entity: 'asset_requests' },
   tax: { label: 'Tax proofs', icon: Landmark, path: (id) => `tax-declarations/${id}/decision`, entity: 'tax_declarations' },
 };
 

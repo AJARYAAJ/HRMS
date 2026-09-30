@@ -292,19 +292,6 @@ export const timesheetsRouter = crud({
 });
 
 // ---------- assets & helpdesk ----------
-export const assetsRouter = crud({
-  table: 'assets', label: 'asset', fields: ['asset_tag', 'name', 'category', 'serial_no', 'assigned_to', 'status', 'purchase_date', 'cost'],
-  owner: 'assigned_to', filters: ['status', 'category', 'assigned_to'], search: ['t.name', 't.asset_tag', 't.serial_no'], order: 't.asset_tag',
-  select: `SELECT t.*, ${EMP_NAME('e')} AS assigned_name FROM assets t LEFT JOIN employees e ON e.id = t.assigned_to`,
-  validate(data) {
-    if ('assigned_to' in data) data.status = data.assigned_to ? 'assigned' : (data.status === 'assigned' ? 'available' : data.status || 'available');
-    return data;
-  },
-  afterCreate(id, data) {
-    if (data.assigned_to) notify(data.assigned_to, 'Asset assigned', `${data.name} (${data.asset_tag}) has been assigned to you`, '/assets');
-  },
-});
-
 export const ticketsRouter = crud({
   table: 'tickets', label: 'ticket',
   afterDelete: (row) => deleteAttachmentsFor('tickets', row.id),

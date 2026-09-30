@@ -1021,3 +1021,28 @@ CREATE TABLE IF NOT EXISTS export_jobs (
   created_by INTEGER,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- ---------- asset lifecycle ----------
+CREATE TABLE IF NOT EXISTS asset_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,                          -- created | assigned | acknowledged | returned | repair | retired | updated
+  employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  by_id INTEGER,
+  condition TEXT,
+  note TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS asset_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  category TEXT NOT NULL,
+  reason TEXT,
+  needed_by TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',        -- pending | manager_approved | approved | rejected | fulfilled
+  approver_id INTEGER,
+  comment TEXT,
+  asset_id INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);

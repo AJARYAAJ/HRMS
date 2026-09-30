@@ -21,6 +21,7 @@ import { exportsRouter } from './routes/exports.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { policiesRouter } from './routes/policies.js';
 import { idCardsRouter, publicVerifyRouter } from './routes/idcards.js';
+import { assetsRouter, assetRequestsRouter } from './routes/assets.js';
 import { workRouter, travelRouter } from './routes/work.js';
 import { agentRouter, activityRouter } from './routes/activity.js';
 import { hrdocsRouter, lettersRouter, letterRequestsRouter, customFieldsRouter, kbRouter } from './routes/hrdocs.js';
@@ -83,7 +84,8 @@ export function createApp() {
   api.use('/policies', policiesRouter);
   api.use('/id-cards', idCardsRouter);
   api.use('/timesheets', m.timesheetsRouter);
-  api.use('/assets', m.assetsRouter);
+  api.use('/assets', assetsRouter);
+  api.use('/asset-requests', assetRequestsRouter);
   api.use('/tickets', m.ticketsRouter);
   api.use('/announcements', m.announcementsRouter);
   api.use('/courses', m.coursesRouter);

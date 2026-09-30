@@ -97,7 +97,7 @@ const STATUS_COLOR = {
   lead: 'slate', qualified: 'blue', proposal: 'violet', negotiation: 'amber', won: 'green', lost: 'red',
   bench: 'red', partial: 'amber', full: 'green', overallocated: 'violet', time_materials: 'blue', fixed: 'violet', non_billable: 'slate',
   logged: 'blue', queued: 'slate', retrying: 'amber', failed: 'red',
-  medium: 'amber', low: 'slate', leave: 'violet', holiday: 'blue', remote: 'blue', applied: 'slate', waived: 'green', admin: 'violet', hr: 'blue', manager: 'amber', employee: 'slate',
+  medium: 'amber', low: 'slate', leave: 'violet', holiday: 'blue', remote: 'blue', applied: 'slate', waived: 'green', fulfilled: 'green', admin: 'violet', hr: 'blue', manager: 'amber', employee: 'slate',
 };
 export function Badge({ children, color, status, className = '', ...rest }) {
   const key = color || STATUS_COLOR[status] || 'slate';

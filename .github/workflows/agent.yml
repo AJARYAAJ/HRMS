@@ -60,29 +60,43 @@ jobs:
         run: |
           RESET_DB=1 PORT=4000 nohup node --no-warnings server/src/index.js > server.log 2>&1 &
           for i in $(seq 1 60); do curl -sf $HRMS_URL/api/health && break; sleep 1; done
-      - name: Start PeopleHub (Windows)
+      # Windows runners end processes a step started when the step finishes, so the server, the installer and the
+      # wait for the first upload run in one step there.
+      - name: Start PeopleHub, install the agent and wait for its first upload (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $env:RESET_DB = '1'; $env:PORT = '4000'
           Start-Process node -ArgumentList '--no-warnings', 'server/src/index.js' -RedirectStandardOutput server.log -RedirectStandardError server.err.log -WindowStyle Hidden
-          for ($i = 0; $i -lt 60; $i++) { try { Invoke-RestMethod "$env:HRMS_URL/api/health" | Out-Null; break } catch { Start-Sleep 1 } }
+          $up = $false
+          for ($i = 0; $i -lt 90; $i++) { try { Invoke-RestMethod "$env:HRMS_URL/api/health" | Out-Null; $up = $true; break } catch { Start-Sleep 1 } }
+          try {
+            if (-not $up) { throw 'PeopleHub did not start' }
+            foreach ($line in (node scripts/ci/agent-register.mjs)) {
+              $k, $v = $line -split '=', 2
+              Set-Item "env:$k" $v
+              Add-Content $env:GITHUB_ENV $line
+            }
+            if ($LASTEXITCODE -ne 0) { throw 'Device registration failed' }
+            $env:PEOPLEHUB_TOKEN = $env:AGENT_TOKEN
+            irm "$env:HRMS_URL/api/agent-downloads/install.ps1" | iex
+            node scripts/ci/agent-wait.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'The agent did not upload' }
+          } catch {
+            Get-Content server.log, server.err.log -Tail 40 -ErrorAction SilentlyContinue
+            throw
+          }
 
       - name: Register a device
+        if: runner.os == 'macOS'
         shell: bash
         run: node scripts/ci/agent-register.mjs >> "$GITHUB_ENV"
 
       - name: Install with the one-line installer (macOS)
         if: runner.os == 'macOS'
         run: curl -fsSL $HRMS_URL/api/agent-downloads/install.sh | PEOPLEHUB_TOKEN="$AGENT_TOKEN" sh
-      - name: Install with the one-line installer (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $env:PEOPLEHUB_TOKEN = $env:AGENT_TOKEN
-          irm "$env:HRMS_URL/api/agent-downloads/install.ps1" | iex
-
       - name: Wait for the agent's first upload
+        if: runner.os == 'macOS'
         shell: bash
         run: node scripts/ci/agent-wait.mjs
 
@@ -101,6 +115,8 @@ jobs:
         shell: pwsh
         run: |
           $exe = "$env:LOCALAPPDATA\PeopleHub\peoplehub-agent.exe"
+          Get-Content server.log, server.err.log -Tail 20 -ErrorAction SilentlyContinue
+          if (-not (Test-Path $exe)) { Write-Host 'Agent not installed'; exit 0 }
           & $exe status | Out-String
           & $exe check | Out-String
           Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name PeopleHubAgent -ErrorAction SilentlyContinue | Format-List

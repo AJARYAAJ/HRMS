@@ -48,7 +48,10 @@ Shipped in **Administration → Policies**. Every plan type below:
 | A5 ✅ | **Expense policy** | Expense categories, each with: per-claim limit; monthly limit; receipt required above an amount; **mileage** (rate per km); per-diem rate; allowed payment modes | Claim validation, reimbursement through payroll, approvals |
 | A6 | **Activity tracking policy** (We360) | Tracking on/off; tracking window (working days and hours only); screenshots on/off and interval; screenshot blur; idle threshold; away limit; pausing allowed | Desktop agent settings, resolved per employee |
 
-## Phase B: Onboarding before and after joining ⏳
+## Phase B: Onboarding before and after joining ✅
+
+Shipped: Onboarding → Pre-boarding (invite, private portal at `/join/<token>`, document verification, convert),
+Onboarding → Checklist templates, buddies, and the My onboarding tab.
 
 - **B1 Pre-boarding (before day one).** Once a candidate is hired, they get a secure portal link with no account
   needed, where they:
@@ -65,7 +68,11 @@ Shipped in **Administration → Policies**. Every plan type below:
   - A **buddy** assignment, an induction schedule and a "My onboarding" page for the new joiner.
   - Progress tracking for HR, with a link to the probation review.
 
-## Phase C: Documents, letters, assets and ID card ⏳
+## Phase C: Documents, letters, assets and ID card ✅
+
+Shipped: Documents (folders, audience, versions, review/expiry dates, My checklist, Compliance, bulk letters, e-sign),
+Assets (requests, acknowledgement, returns, warranty, history, F&F recovery) and ID card (photo, QR verification at
+`/verify/<code>`, PNG/print, batch printing).
 
 - **C1 Organisation documents:** folders; audience (everyone, department, location, company or chosen people);
   version history; expiry and review dates; acknowledgement (exists).

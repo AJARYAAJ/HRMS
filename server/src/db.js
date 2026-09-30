@@ -34,6 +34,21 @@ export function migrate() {
   addColumn('holidays', 'list_id', 'INTEGER');     // NULL = the default holiday list
   addColumn('leave_balances', 'adjustment', 'REAL NOT NULL DEFAULT 0'); // comp-offs, penalties, manual corrections
   addColumn('employees', 'photo_file', 'TEXT');
+  addColumn('documents', 'folder', "TEXT");
+  addColumn('documents', 'audience_type', "TEXT DEFAULT 'all'");
+  addColumn('documents', 'audience_ids', "TEXT");
+  addColumn('documents', 'version', "INTEGER DEFAULT 1");
+  addColumn('documents', 'expires_on', "TEXT");
+  addColumn('documents', 'review_on', "TEXT");
+  addColumn('documents', 'doc_type_id', "INTEGER");
+  addColumn('documents', 'verification', "TEXT");
+  addColumn('documents', 'verified_by', "INTEGER");
+  addColumn('documents', 'verify_note', "TEXT");
+  addColumn('documents', 'requires_signature', "INTEGER DEFAULT 0");
+  addColumn('documents', 'signed_at', "TEXT");
+  addColumn('documents', 'signature', "TEXT");
+  addColumn('documents', 'expiry_reminded_at', "TEXT");
+  addColumn('documents', 'updated_at', "TEXT");
   addColumn('employees', 'buddy_id', 'INTEGER');
   addColumn('onboarding_tasks', 'done_at', 'TEXT');
   addColumn('onboarding_tasks', 'done_by', 'INTEGER');

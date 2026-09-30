@@ -1,4 +1,5 @@
 import { migrate, get } from './db.js';
+import { remindExpiringDocuments } from './routes/docs.js';
 import { seed } from './seed.js';
 import { createApp } from './app.js';
 import { startMailer, smtpConfig } from './mailer.js';
@@ -29,3 +30,8 @@ console.log(smtpConfig() ? `Email: delivering via SMTP ${smtpConfig().host}:${sm
 
 const port = Number(process.env.PORT) || 4000;
 createApp().listen(port, () => console.log(`PeopleHub HRMS API running on http://localhost:${port}`));
+
+// Daily housekeeping: remind employees about documents that expire within 30 days.
+const housekeeping = () => { try { remindExpiringDocuments(); } catch (e) { console.error('[jobs] document reminders failed', e); } };
+setTimeout(housekeeping, 60_000).unref();
+setInterval(housekeeping, 24 * 3600_000).unref();

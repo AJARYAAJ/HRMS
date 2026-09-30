@@ -124,6 +124,22 @@ Legend: ✅ implemented · ◑ partly implemented (limits noted) · — not impl
 | Bulk export of 17 datasets to Excel or CSV with filters and column picking, logged | Keka | ✅ | Bulk export |
 | Cross-module analytics: headcount, attrition, tenure, attendance, utilisation, pipeline, eNPS, revenue vs payroll | Keka, Zoho | ✅ | Analytics |
 
+## Onboarding, documents, assets and ID cards
+
+| Feature | Reference | PeopleHub | Where |
+| --- | --- | --- | --- |
+| Pre-boarding portal (no account): personal, address, emergency and bank details, document checklist, offer e-signature | Keka, Zoho | ✅ | Onboarding → Pre-boarding; `/join/<token>` |
+| HR document verification with send-back notes; convert pre-hire to employee with pre-filled profile | Keka | ✅ | Onboarding → Pre-boarding |
+| Onboarding / offboarding checklist templates per department with owners and day offsets | Keka, Zoho | ✅ | Onboarding → Checklist templates |
+| Onboarding buddy and a new joiner's My onboarding page | Keka | ✅ | Onboarding |
+| Organisation documents: folders, audience (department / location / entity), versions, review and expiry dates | Keka, Zoho | ✅ | Documents |
+| Re-acknowledgement when a policy changes | Keka | ✅ | Documents → new version |
+| Employee document checklist with HR verification, expiry tracking and reminders | Keka, Zoho | ✅ | Documents → My checklist, Compliance |
+| Bulk letter generation and employee e-signature | Keka | ✅ | Documents → Letter requests → Bulk letters |
+| Asset requests with approval, receipt acknowledgement, returns with condition, warranty, full history | Keka | ✅ | Assets |
+| Unreturned assets recovered in full & final settlement | Keka | ✅ | Exit → F&F |
+| Digital ID card with photo and QR verification page; PNG, print / PDF and batch printing | Keka | ✅ | ID card |
+
 ## Not implemented
 
 - Biometric device integration.

@@ -692,11 +692,34 @@ export function seed({ reset = true } = {}) {
       ['POSH Policy', 'Compliance', 'Zero tolerance for harassment. Internal Committee contact: ic@nimbus.example.'],
       ['Holiday List 2026', 'Calendar', 'Public and optional holidays for the calendar year 2026.'],
     ];
+    const FOLDERS = { Policy: 'HR policies', Compliance: 'Compliance', Calendar: 'Calendars' };
     for (const [title, category, content] of policies) {
-      const docId = insert('documents', { title, category, content, employee_id: null });
+      const docId = insert('documents', { title, category, content, employee_id: null, folder: title.startsWith('Travel') ? 'Finance' : FOLDERS[category], review_on: `${year + 1}-03-31` });
       seedFile('documents', docId, `${title.replace(/[^a-z0-9]+/gi, '-')}.pdf`,
         buildPdf({ title, company: settings.company_name, address: settings.company_address, body: `${content}\n\nEffective from 1 April ${year}. Questions? Contact ${settings.company_email}.`, footer: `${settings.company_name} · Confidential` }), hr);
     }
+    // A policy only the sales team sees and acknowledges.
+    const salesDoc = insert('documents', { title: 'Sales Incentive Plan FY27', category: 'Policy', folder: 'Sales', employee_id: null, requires_ack: 1, audience_type: 'department', audience_ids: JSON.stringify([dept.Sales]),
+      content: 'Quarterly incentive slabs, accelerators above 120% of target, and clawback rules.' });
+    seedFile('documents', salesDoc, 'Sales-Incentive-Plan.pdf', buildPdf({ title: 'Sales Incentive Plan FY27', company: settings.company_name, body: 'Quarterly incentive slabs, accelerators above 120% of target, and clawback rules.' }), hr);
+
+    // Employee document checklist: required KYC plus documents that expire.
+    const dtype = (name, category, required, has_expiry, description) => insert('document_types', { name, category, required, has_expiry, description });
+    const T = {
+      pan: dtype('PAN card', 'KYC', 1, 0, 'Permanent Account Number card'), aadhaar: dtype('Aadhaar card', 'KYC', 1, 0, 'Front and back'),
+      education: dtype('Highest education certificate', 'Education', 1, 0, 'Degree or final marksheet'), bank: dtype('Bank proof', 'Finance', 1, 0, 'Cancelled cheque or statement'),
+      passport: dtype('Passport', 'Travel', 0, 1, 'Needed for international travel'), visa: dtype('Work visa', 'Travel', 0, 1, 'For employees travelling on client assignments'),
+    };
+    for (const e of emps) {
+      if (e.id === emp) continue;
+      for (const [k, title] of [['pan', 'PAN card'], ['aadhaar', 'Aadhaar card'], ['education', 'Highest education certificate'], ['bank', 'Bank proof']]) {
+        if (rand() < 0.08) continue; // a few gaps for the compliance report
+        insert('documents', { title, category: 'KYC', employee_id: e.id, content: 'Verified copy on file', doc_type_id: T[k], verification: rand() < 0.9 ? 'verified' : 'pending', verified_by: hr });
+      }
+    }
+    insert('documents', { title: 'PAN card', category: 'KYC', employee_id: emp, content: 'Verified copy on file', doc_type_id: T.pan, verification: 'verified', verified_by: hr });
+    insert('documents', { title: 'Bank proof', category: 'Finance', employee_id: emp, content: 'Cancelled cheque', doc_type_id: T.bank, verification: 'verified', verified_by: hr });
+    insert('documents', { title: 'Passport', category: 'Travel', employee_id: emp, content: 'Passport N1234567', doc_type_id: T.passport, verification: 'verified', verified_by: hr, expires_on: ymd(addDays(today, 20)) });
     insert('documents', { title: 'Offer Letter', category: 'Personal', content: 'Offer letter for Software Engineer role.', employee_id: emp });
     insert('documents', { title: 'Appraisal Letter FY25', category: 'Personal', content: 'Revised compensation effective April.', employee_id: emp });
 

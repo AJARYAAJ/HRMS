@@ -214,7 +214,13 @@ preboardingRouter.post('/:id/convert', (req, res) => {
   }, req.user.id);
   tx(() => {
     for (const doc of docs.filter((x) => x.status === 'verified')) {
-      const docId = insert('documents', { title: DOC[doc.doc_type]?.label || doc.doc_type, category: 'Personal', employee_id: employeeId, content: 'Verified during pre-boarding' });
+      // Checklist types share names with the pre-boarding documents, so verified uploads count towards compliance.
+      const typeName = { pan: 'PAN card', aadhaar: 'Aadhaar card', education: 'Highest education certificate', bank_proof: 'Bank proof' }[doc.doc_type];
+      const docType = typeName && get('SELECT id, category FROM document_types WHERE name = ?', typeName);
+      const docId = insert('documents', {
+        title: DOC[doc.doc_type]?.label || doc.doc_type, category: docType?.category || 'Personal', employee_id: employeeId, content: 'Verified during pre-boarding',
+        doc_type_id: docType?.id ?? null, verification: 'verified', verified_by: req.user.id,
+      });
       insert('attachments', { entity: 'documents', entity_id: docId, stored_name: doc.stored_name, original_name: doc.original_name, mime_type: doc.mime_type, size: doc.size, uploaded_by: req.user.id });
       if (doc.doc_type === 'photo' && doc.mime_type.startsWith('image/')) {
         // The ID card photo gets its own copy so deleting the document never breaks the card.

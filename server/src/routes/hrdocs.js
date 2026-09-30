@@ -6,6 +6,7 @@ import { all, get, insert, update, run, tx } from '../db.js';
 import { requireRole } from '../auth.js';
 import { crud } from '../crud.js';
 import { audit, httpError, notify, notifyHR, today } from '../utils.js';
+import { audienceSql, inAudience } from './docs.js';
 import { buildPdf } from '../pdf.js';
 import { UPLOAD_DIR, singleFile, removeFile } from '../uploads.js';
 import { emailEmployee } from '../mailer.js';
@@ -108,6 +109,35 @@ hrdocsRouter.post('/letters/generate', requireRole('admin', 'hr'), (req, res) =>
   res.status(201).json({ document_id: result.documentId, filename: result.filename });
 });
 
+/**
+ * Bulk letters: one template for many employees (chosen people or a whole department), each filed under the
+ * employee's documents, optionally emailed and optionally awaiting their electronic signature.
+ */
+hrdocsRouter.post('/letters/bulk', requireRole('admin', 'hr'), (req, res) => {
+  const { template_id: templateId, purpose, send_email: sendEmail = true, require_signature: requireSignature = false } = req.body || {};
+  if (!templateId || !get('SELECT id FROM letter_templates WHERE id = ?', templateId)) throw httpError(400, 'Choose a template');
+  let ids = Array.isArray(req.body.employee_ids) ? req.body.employee_ids.map(Number).filter(Boolean) : [];
+  if (req.body.department_id) ids = [...new Set([...ids, ...all("SELECT id FROM employees WHERE department_id = ? AND status != 'exited'", Number(req.body.department_id)).map((r) => r.id)])];
+  if (!ids.length) throw httpError(400, 'Choose at least one employee or a department');
+  if (ids.length > 500) throw httpError(400, 'Generate at most 500 letters at a time');
+  const issued = [];
+  for (const employeeId of ids) {
+    const r = generateLetter({ templateId: Number(templateId), employeeId, purpose, userId: req.user.id });
+    if (requireSignature) update('documents', r.documentId, { requires_signature: 1 });
+    notify(employeeId, `Your ${r.template.name} is ready`, requireSignature ? 'Please review and sign it in Documents.' : 'Download it from Documents.', '/documents', { email: false });
+    if (sendEmail) {
+      emailEmployee(employeeId, {
+        force: true, template: 'letter', subject: `Your ${r.template.name}`, heading: r.template.name,
+        paragraphs: [`Please find your ${r.template.name.toLowerCase()} attached.${requireSignature ? ' Sign it electronically under Documents in PeopleHub.' : ''}`],
+        attachments: [{ filename: r.filename, storedName: r.storedName }],
+      });
+    }
+    issued.push(r.documentId);
+  }
+  audit(req.user.id, 'bulk_letters', 'documents', null, { template_id: templateId, count: issued.length, require_signature: !!requireSignature });
+  res.status(201).json({ issued: issued.length, document_ids: issued });
+});
+
 // ---------- letter requests (salary certificate, experience letter, address proof…) ----------
 export const letterRequestsRouter = crud({
   table: 'letter_requests', label: 'letter request', link: '/documents', fields: ['employee_id', 'type', 'purpose'],
@@ -136,6 +166,7 @@ letterRequestsRouter.post('/:id/reject', requireRole('admin', 'hr'), (req, res) 
 hrdocsRouter.post('/documents/:id/acknowledge', (req, res) => {
   const doc = get('SELECT * FROM documents WHERE id = ?', req.params.id);
   if (!doc || (doc.employee_id && doc.employee_id !== req.user.id)) throw httpError(404, 'Document not found');
+  if (!inAudience(doc, get('SELECT * FROM employees WHERE id = ?', req.user.id))) throw httpError(404, 'Document not found');
   if (!doc.requires_ack) throw httpError(400, 'This document does not need acknowledgement');
   run('INSERT OR IGNORE INTO document_acks (document_id, employee_id) VALUES (?, ?)', doc.id, req.user.id);
   audit(req.user.id, 'acknowledge', 'documents', doc.id);
@@ -145,12 +176,13 @@ hrdocsRouter.post('/documents/:id/acknowledge', (req, res) => {
 hrdocsRouter.get('/documents/:id/acknowledgements', requireRole('admin', 'hr'), (req, res) => {
   const doc = get('SELECT * FROM documents WHERE id = ?', req.params.id);
   if (!doc) throw httpError(404, 'Document not found');
+  const aud = doc.employee_id ? { sql: 'e.id = ?', params: [doc.employee_id] } : audienceSql(doc);
   const rows = all(
     `SELECT e.id, e.first_name || ' ' || e.last_name AS name, e.avatar_color, d.name AS department, a.acknowledged_at
      FROM employees e LEFT JOIN departments d ON d.id = e.department_id
      LEFT JOIN document_acks a ON a.employee_id = e.id AND a.document_id = ?
-     WHERE e.status != 'exited' ${doc.employee_id ? 'AND e.id = ?' : ''} ORDER BY a.acknowledged_at IS NULL DESC, e.first_name`,
-    doc.id, ...(doc.employee_id ? [doc.employee_id] : []),
+     WHERE e.status != 'exited' AND ${aud.sql} ORDER BY a.acknowledged_at IS NULL DESC, e.first_name`,
+    doc.id, ...aud.params,
   );
   res.json({ document: doc, acknowledged: rows.filter((r) => r.acknowledged_at).length, total: rows.length, rows });
 });
@@ -158,8 +190,9 @@ hrdocsRouter.get('/documents/:id/acknowledgements', requireRole('admin', 'hr'), 
 hrdocsRouter.post('/documents/:id/remind', requireRole('admin', 'hr'), (req, res) => {
   const doc = get('SELECT * FROM documents WHERE id = ? AND requires_ack = 1', req.params.id);
   if (!doc) throw httpError(404, 'Document not found');
+  const aud = audienceSql(doc);
   const pending = all(
-    `SELECT e.id FROM employees e WHERE e.status != 'exited' AND NOT EXISTS (SELECT 1 FROM document_acks a WHERE a.document_id = ? AND a.employee_id = e.id)`, doc.id,
+    `SELECT e.id FROM employees e WHERE e.status != 'exited' AND ${aud.sql} AND NOT EXISTS (SELECT 1 FROM document_acks a WHERE a.document_id = ? AND a.employee_id = e.id)`, ...aud.params, doc.id,
   );
   for (const p of pending) notify(p.id, `Please acknowledge: ${doc.title}`, 'Read the document and click Acknowledge.', '/documents');
   res.json({ reminded: pending.length });

@@ -22,6 +22,7 @@ import { analyticsRouter } from './routes/analytics.js';
 import { policiesRouter } from './routes/policies.js';
 import { idCardsRouter, publicVerifyRouter } from './routes/idcards.js';
 import { assetsRouter, assetRequestsRouter } from './routes/assets.js';
+import { docsExtraRouter, documentTypesRouter } from './routes/docs.js';
 import { preboardingRouter, joinRouter, onboardingTemplatesRouter, myOnboarding, setBuddy } from './routes/preboarding.js';
 import { workRouter, travelRouter } from './routes/work.js';
 import { agentRouter, activityRouter } from './routes/activity.js';
@@ -96,7 +97,9 @@ export function createApp() {
   api.use('/announcements', m.announcementsRouter);
   api.use('/courses', m.coursesRouter);
   api.use('/enrollments', m.enrollmentsRouter);
+  api.use('/documents', docsExtraRouter);
   api.use('/documents', m.documentsRouter);
+  api.use('/document-types', documentTypesRouter);
   api.use('/surveys', m.surveysRouter);
   api.use('/notifications', m.notificationsRouter);
   api.use('/audit-logs', m.auditRouter);

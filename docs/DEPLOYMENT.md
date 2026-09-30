@@ -72,7 +72,7 @@ In `.env`, set at least these values (keep the quotes around values that contain
 | Setting | Example | Notes |
 | --- | --- | --- |
 | `JWT_SECRET` | the 64-character value from `openssl rand -hex 32` | **Required.** Keep it secret. Changing it signs everyone out |
-| `APP_URL` | `https://hr.yourcompany.com` | Used in email links and installer commands |
+| `APP_URL` | `https://hr.yourcompany.com` | Used in email links, installer commands, pre-boarding links and ID card QR codes — set it to your real address |
 | `DOMAIN` | `hr.yourcompany.com` | Option A only: Caddy requests the certificate for it |
 | `ADMIN_EMAIL` | `you@yourcompany.com` | Your administrator login. Only used on the very first start |
 | `ADMIN_PASSWORD` | a strong password (10+ characters) | Change it after first sign-in (click your name → **My Profile** → Change password) |

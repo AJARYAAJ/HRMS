@@ -4,6 +4,7 @@ import { requireRole, isHR, canManage } from '../auth.js';
 import { crud } from '../crud.js';
 import { httpError, audit, notify, notifyHR, today } from '../utils.js';
 import { expenseCategoriesFor } from '../policies.js';
+import { AUDIENCES, parseIds, inAudience, audienceEmployees } from './docs.js';
 import { createEmployee } from './employees.js';
 import { singleFile, removeFile, deleteAttachmentsFor } from '../uploads.js';
 import { saveAttachment } from './attachments.js';
@@ -362,22 +363,35 @@ documentsRouter.get('/', (req, res) => {
     personal,
   );
   const mine = new Set(all('SELECT document_id FROM document_acks WHERE employee_id = ?', req.user.id).map((r) => r.document_id));
-  const counts = isHR(req.user)
-    ? Object.fromEntries(all('SELECT document_id, COUNT(*) AS n FROM document_acks GROUP BY document_id').map((r) => [r.document_id, r.n]))
-    : {};
-  const headcount = isHR(req.user) ? get("SELECT COUNT(*) AS n FROM employees WHERE status != 'exited'").n : null;
-  res.json(rows.map((d) => ({
-    ...d, acknowledged: mine.has(d.id),
-    ...(isHR(req.user) && d.requires_ack ? { ack_count: counts[d.id] || 0, ack_total: d.employee_id ? 1 : headcount } : {}),
-  })));
+  const hr = isHR(req.user);
+  const me = get('SELECT * FROM employees WHERE id = ?', req.user.id);
+  const visible = hr ? rows : rows.filter((d) => inAudience(d, me));
+  res.json(visible.map((d) => {
+    const out = { ...d, audience_ids: parseIds(d.audience_ids), acknowledged: mine.has(d.id), requires_signature: !!d.requires_signature };
+    if (hr && d.requires_ack) {
+      const aud = d.employee_id ? [d.employee_id] : audienceEmployees(d);
+      out.ack_total = aud.length;
+      out.ack_count = aud.length ? get(`SELECT COUNT(*) AS n FROM document_acks WHERE document_id = ? AND employee_id IN (${aud.join(',')})`, d.id).n : 0;
+    }
+    return out;
+  }));
 });
 // HR publishes company-wide or personal documents; employees may upload their own personal documents (KYC, certificates).
 documentsRouter.post('/', singleFile(false), (req, res) => {
   const { title, category, content } = req.body;
+  const audienceType = AUDIENCES.includes(req.body.audience_type) ? req.body.audience_type : 'all';
+  const audienceIds = parseIds(req.body.audience_ids);
+  const docType = req.body.doc_type_id ? get('SELECT * FROM document_types WHERE id = ?', Number(req.body.doc_type_id)) : null;
+  const dateOk = (d) => !d || /^\d{4}-\d{2}-\d{2}$/.test(d);
+  if (!dateOk(req.body.expires_on) || !dateOk(req.body.review_on)) {
+    if (req.file) removeFile(req.file.filename);
+    throw httpError(400, 'Dates must be YYYY-MM-DD');
+  }
   const requiresAck = isHR(req.user) && ['1', 'true', 'on'].includes(String(req.body.requires_ack)) ? 1 : 0;
   const hr = isHR(req.user);
   const employeeId = hr ? (req.body.employee_id ? Number(req.body.employee_id) : null) : req.user.id;
-  if (!title) {
+  const docTitle = title || docType?.name;
+  if (!docTitle) {
     if (req.file) removeFile(req.file.filename);
     throw httpError(400, 'Title is required');
   }
@@ -385,7 +399,13 @@ documentsRouter.post('/', singleFile(false), (req, res) => {
   let id;
   try {
     id = tx(() => {
-      const docId = insert('documents', { title, category: category || (hr ? 'Policy' : 'Personal'), employee_id: employeeId, content: content || null, requires_ack: requiresAck });
+      const docId = insert('documents', {
+        title: docTitle, category: category || docType?.category || (hr ? 'Policy' : 'Personal'), employee_id: employeeId, content: content || null, requires_ack: requiresAck,
+        folder: String(req.body.folder || '').trim() || null, expires_on: req.body.expires_on || null, review_on: req.body.review_on || null,
+        audience_type: employeeId ? 'employees' : audienceType, audience_ids: employeeId ? null : (audienceType === 'all' ? null : JSON.stringify(audienceIds)),
+        doc_type_id: employeeId ? docType?.id ?? null : null, verification: employeeId && docType ? (hr ? 'verified' : 'pending') : null,
+        requires_signature: hr && employeeId && ['1', 'true', 'on'].includes(String(req.body.requires_signature)) ? 1 : 0,
+      });
       if (req.file) saveAttachment(req.file, 'documents', docId, req.user.id);
       audit(req.user.id, 'create', 'documents', docId, req.file ? { file: req.file.originalname } : undefined);
       return docId;
@@ -395,13 +415,13 @@ documentsRouter.post('/', singleFile(false), (req, res) => {
     if (req.file) removeFile(req.file.filename);
     throw err;
   }
-  if (hr && employeeId) notify(employeeId, 'New document shared with you', title, '/documents');
+  if (hr && employeeId) notify(employeeId, 'New document shared with you', docTitle, '/documents');
   if (hr && !employeeId && requiresAck) {
-    for (const { id: eid } of all("SELECT id FROM employees WHERE status != 'exited' AND id != ?", req.user.id)) {
-      notify(eid, `Please read and acknowledge: ${title}`, 'A new company policy needs your acknowledgement.', '/documents');
+    for (const eid of audienceEmployees({ audience_type: audienceType, audience_ids: audienceIds })) {
+      if (eid !== req.user.id) notify(eid, `Please read and acknowledge: ${docTitle}`, 'A new company policy needs your acknowledgement.', '/documents');
     }
   }
-  if (!hr) notifyHR('Employee uploaded a document', `${req.user.first_name} ${req.user.last_name}: ${title}`, '/documents');
+  if (!hr) notifyHR(docType ? 'Document awaiting verification' : 'Employee uploaded a document', `${req.user.first_name} ${req.user.last_name}: ${docTitle}`, '/documents?tab=compliance');
   res.status(201).json(get(`${DOC_SELECT} WHERE d.id = ?`, id));
 });
 documentsRouter.delete('/:id', (req, res) => {

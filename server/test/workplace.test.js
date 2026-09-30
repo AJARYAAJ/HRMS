@@ -198,7 +198,8 @@ test('pre-boarding: invite → portal details, documents, e-signed offer → HR 
   assert.match(emp.emergency_contact, /Anil Joshi \(Father\)/);
   const tasks = get("SELECT group_concat(title, '|') AS t FROM onboarding_tasks WHERE employee_id = ?", emp.id).t;
   assert.match(tasks, /Set up development environment/); // Engineering template
-  assert.equal(get("SELECT COUNT(*) AS n FROM documents WHERE employee_id = ? AND category = 'Personal'", emp.id).n, 5);
+  assert.equal(get("SELECT COUNT(*) AS n FROM documents WHERE employee_id = ? AND content = 'Verified during pre-boarding'", emp.id).n, 5);
+  assert.equal(get("SELECT COUNT(*) AS n FROM documents WHERE employee_id = ? AND doc_type_id IS NOT NULL AND verification = 'verified'", emp.id).n, 4); // count towards the checklist
   assert.equal((await call(null, 'GET', `join/${token}`)).body.status, 'converted');
   assert.equal((await call(null, 'POST', `join/${token}/submit`)).status, 400);
 
@@ -227,4 +228,80 @@ test('onboarding templates: department-specific checklists, default rules and bu
   assert.equal((await call('hr', 'POST', 'onboarding/buddy', { employee_id: newbie.body.id, buddy_id: newbie.body.id })).status, 400);
   assert.equal((await call('hr', 'POST', 'onboarding/buddy', { employee_id: newbie.body.id, buddy_id: 4 })).status, 200);
   assert.equal(get('SELECT buddy_id FROM employees WHERE id = ?', newbie.body.id).buddy_id, 4);
+});
+
+test('documents: audience targeting, versions with re-acknowledgement, checklist verification, expiry reminders', async () => {
+  const sales = get("SELECT id FROM departments WHERE name = 'Sales'").id;
+  const salesDoc = get("SELECT id FROM documents WHERE title = 'Sales Incentive Plan FY27'").id;
+  assert.ok(!(await call('employee', 'GET', 'documents')).body.some((d) => d.id === salesDoc)); // engineering can't see it
+  assert.equal((await call('employee', 'POST', `hr/documents/${salesDoc}/acknowledge`)).status, 404);
+  const hrView = (await call('hr', 'GET', 'documents')).body.find((d) => d.id === salesDoc);
+  const salesCount = get("SELECT COUNT(*) AS n FROM employees WHERE department_id = ? AND status != 'exited'", sales).n;
+  assert.equal(hrView.ack_total, salesCount);
+  assert.equal((await call('hr', 'GET', `hr/documents/${salesDoc}/acknowledgements`)).body.total, salesCount);
+
+  // Company document for Engineering only, with a new version that asks everyone to acknowledge again.
+  const eng = get("SELECT id FROM departments WHERE name = 'Engineering'").id;
+  const pub = await call('hr', 'POST', 'documents', fileForm(Buffer.from('%PDF-1.4\n%%EOF\n'), 'application/pdf', 'oncall-v1.pdf',
+    { title: 'On-call policy', category: 'Policy', folder: 'Engineering', audience_type: 'department', audience_ids: JSON.stringify([eng]), requires_ack: 1, review_on: '2027-06-30' }));
+  assert.equal(pub.status, 201);
+  const docId = pub.body.id;
+  assert.equal((await call('employee', 'POST', `hr/documents/${docId}/acknowledge`)).status, 200);
+  assert.equal((await call('employee', 'POST', `documents/${docId}/versions`, fileForm(Buffer.from('%PDF-1.4\n%%EOF\n'), 'application/pdf', 'x.pdf'))).status, 403);
+  const v2 = await call('hr', 'POST', `documents/${docId}/versions`, fileForm(Buffer.from('%PDF-1.4\n%PDF v2\n%%EOF\n'), 'application/pdf', 'oncall-v2.pdf', { reack: 1, note: 'New escalation matrix' }));
+  assert.equal(v2.body.version, 2);
+  const versions = (await call('employee', 'GET', `documents/${docId}/versions`)).body;
+  assert.deepEqual(versions.map((v) => [v.version, v.current, v.original_name]), [[2, true, 'oncall-v2.pdf'], [1, false, 'oncall-v1.pdf']]);
+  assert.equal((await call('employee', 'GET', 'documents')).body.find((d) => d.id === docId).acknowledged, false);
+
+  // Checklist: the demo employee is missing Aadhaar; uploads it, HR sends it back, then verifies the re-upload.
+  let list = (await call('employee', 'GET', 'documents/checklist')).body;
+  assert.equal(list.complete, false);
+  assert.equal(list.items.find((i) => i.type.name === 'Aadhaar card').state, 'missing');
+  assert.equal(list.items.find((i) => i.type.name === 'Passport').state, 'expiring');
+  const aadhaarType = get("SELECT id FROM document_types WHERE name = 'Aadhaar card'").id;
+  const up = await call('employee', 'POST', 'documents', fileForm(Buffer.from('%PDF-1.4\n%%EOF\n'), 'application/pdf', 'aadhaar.pdf', { doc_type_id: aadhaarType }));
+  assert.equal(up.body.title, 'Aadhaar card');
+  assert.equal(up.body.verification, 'pending');
+  assert.equal((await call('employee', 'PUT', `documents/${up.body.id}/verify`, { status: 'verified' })).status, 403);
+  assert.equal((await call('hr', 'PUT', `documents/${up.body.id}/verify`, { status: 'rejected' })).status, 400);
+  await call('hr', 'PUT', `documents/${up.body.id}/verify`, { status: 'rejected', note: 'Blurry' });
+  assert.equal((await call('employee', 'GET', 'documents/checklist')).body.items.find((i) => i.type.id === aadhaarType).state, 'rejected');
+  await call('employee', 'POST', `documents/${up.body.id}/versions`, fileForm(Buffer.from('%PDF-1.4\n%%EOF\n'), 'application/pdf', 'aadhaar-clear.pdf'));
+  assert.equal((await call('employee', 'GET', 'documents/checklist')).body.items.find((i) => i.type.id === aadhaarType).state, 'pending');
+  await call('hr', 'PUT', `documents/${up.body.id}/verify`, { status: 'verified' });
+  const educationType = get("SELECT id FROM document_types WHERE name = 'Highest education certificate'").id;
+  await call('employee', 'POST', 'documents', fileForm(Buffer.from('%PDF-1.4\n%%EOF\n'), 'application/pdf', 'degree.pdf', { doc_type_id: educationType }));
+  const edu = get('SELECT id FROM documents WHERE employee_id = 4 AND doc_type_id = ? ORDER BY id DESC', educationType).id;
+  await call('hr', 'PUT', `documents/${edu}/verify`, { status: 'verified' });
+  list = (await call('employee', 'GET', 'documents/checklist')).body;
+  assert.equal(list.complete, true);
+  const comp = (await call('hr', 'GET', 'documents/compliance')).body;
+  assert.ok(comp.employees.find((e) => e.id === 4).complete);
+  assert.ok(comp.expiring.some((d) => d.title === 'Passport'));
+  assert.ok(comp.reviews_due.length === 0 || comp.reviews_due.every((d) => d.review_on));
+
+  const { remindExpiringDocuments } = await import('../src/routes/docs.js');
+  const first = remindExpiringDocuments();
+  assert.ok(first >= 1);
+  assert.equal(remindExpiringDocuments(), 0); // reminded once
+  assert.ok(get("SELECT id FROM notifications WHERE employee_id = 4 AND title LIKE 'Passport expires%'"));
+});
+
+test('letters: bulk generation for a department with electronic signature', async () => {
+  const tpl = get("SELECT id FROM letter_templates WHERE type = 'confirmation'").id;
+  const design = get("SELECT id FROM departments WHERE name = 'Design'").id;
+  const n = get("SELECT COUNT(*) AS n FROM employees WHERE department_id = ? AND status != 'exited'", design).n;
+  assert.equal((await call('manager', 'POST', 'hr/letters/bulk', { template_id: tpl, department_id: design })).status, 403);
+  assert.equal((await call('hr', 'POST', 'hr/letters/bulk', { template_id: tpl })).status, 400);
+  const r = await call('hr', 'POST', 'hr/letters/bulk', { template_id: tpl, department_id: design, employee_ids: [4], require_signature: true, send_email: false });
+  assert.equal(r.status, 201);
+  assert.equal(r.body.issued, n + 1);
+  const mine = (await call('employee', 'GET', 'documents')).body.find((d) => r.body.document_ids.includes(d.id));
+  assert.equal(mine.requires_signature, true);
+  assert.equal((await call('employee', 'POST', `documents/${mine.id}/sign`, { signature: 'Someone Else' })).status, 400);
+  assert.equal((await call('manager', 'POST', `documents/${mine.id}/sign`, { signature: 'Rohan Mehta' })).status, 404);
+  assert.equal((await call('employee', 'POST', `documents/${mine.id}/sign`, { signature: 'Ananya Iyer' })).status, 200);
+  assert.equal((await call('employee', 'POST', `documents/${mine.id}/sign`, { signature: 'Ananya Iyer' })).status, 400);
+  assert.ok(get('SELECT signed_at FROM documents WHERE id = ?', mine.id).signed_at);
 });

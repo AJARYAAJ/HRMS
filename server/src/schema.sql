@@ -1105,3 +1105,13 @@ CREATE TABLE IF NOT EXISTS preboarding_documents (
   created_at TEXT DEFAULT (datetime('now')),
   UNIQUE(preboarding_id, doc_type)
 );
+
+-- ---------- employee document checklist ----------
+CREATE TABLE IF NOT EXISTS document_types (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  category TEXT DEFAULT 'KYC',
+  required INTEGER DEFAULT 1,
+  has_expiry INTEGER DEFAULT 0,
+  description TEXT
+);

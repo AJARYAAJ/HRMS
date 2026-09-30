@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { FileText, Upload, Trash2, BookOpen, User, Search, Download, Eye, Plus, FileSignature } from 'lucide-react';
+import { FileText, Upload, Trash2, BookOpen, User, Search, Download, Eye, Plus, FileSignature, History, PenLine, Folder, Files } from 'lucide-react';
+import { Checklist, Compliance, VersionUpload, VersionsModal, SignModal, BulkLetters } from './DocumentsExtra';
 import { useSearchParams } from 'react-router-dom';
 import DataTable from '../components/DataTable';
 import CrudTable from '../components/CrudTable';
@@ -18,28 +19,42 @@ function UploadModal({ open, onClose }) {
   const [progress, setProgress] = useState(null);
   useEffect(() => {
     if (!open) return;
-    setValues({ category: isHR ? 'Policy' : 'KYC' });
+    setValues(isHR ? { category: 'Policy', audience_type: 'all' } : { category: 'KYC' });
     setFile(null);
     setProgress(null);
   }, [open, isHR]);
+  const { data: docTypes = [] } = useGet(open ? 'document-types' : null);
+  const aud = (type) => (v) => v.employee_id || v.audience_type !== type;
   const fields = isHR
     ? [
       { name: 'title', label: 'Title', required: true, full: true },
       { name: 'category', label: 'Category', type: 'select', noEmpty: true, options: ['Policy', 'Compliance', 'Calendar', 'Letter', 'Form', 'Personal'] },
-      { name: 'employee_id', label: 'Share with (empty = everyone)', type: 'employee' },
-      { name: 'requires_ack', label: 'Employees must read and acknowledge this', type: 'checkbox', hidden: (v) => !!v.employee_id },
+      { name: 'folder', label: 'Folder', placeholder: 'e.g. HR policies, Finance', hidden: (v) => !!v.employee_id },
+      { name: 'employee_id', label: 'Personal document for (empty = company document)', type: 'employee', full: true },
+      { name: 'audience_type', label: 'Who can see it', type: 'select', noEmpty: true, options: [['all', 'Everyone'], ['department', 'A department'], ['location', 'A location'], ['company', 'A legal entity']], hidden: (v) => !!v.employee_id },
+      { name: 'audience_department', label: 'Department', type: 'lookup', path: 'departments', hidden: aud('department') },
+      { name: 'audience_location', label: 'Location', type: 'lookup', path: 'locations', hidden: aud('location') },
+      { name: 'audience_company', label: 'Company', type: 'lookup', path: 'companies', hidden: aud('company') },
+      { name: 'review_on', label: 'Review by', type: 'date', hidden: (v) => !!v.employee_id },
+      { name: 'expires_on', label: 'Expires on', type: 'date' },
+      { name: 'requires_ack', label: 'Employees must read and acknowledge this', type: 'checkbox', hidden: (v) => !!v.employee_id, full: true },
+      { name: 'requires_signature', label: 'The employee must sign it electronically', type: 'checkbox', hidden: (v) => !v.employee_id, full: true },
       { name: 'content', label: 'Description / content', type: 'textarea', full: true, hint: 'Optional when a file is attached.' },
     ]
     : [
-      { name: 'title', label: 'Title', required: true, full: true, placeholder: 'e.g. PAN card, Degree certificate' },
-      { name: 'category', label: 'Category', type: 'select', noEmpty: true, options: ['KYC', 'Certificate', 'Personal', 'Medical', 'Other'], full: true },
+      { name: 'doc_type_id', label: 'Document type', type: 'select', options: docTypes.map((t) => [t.id, t.name]), placeholder: 'Other document', full: true },
+      { name: 'title', label: 'Title', required: true, full: true, placeholder: 'e.g. Degree certificate', hidden: (v) => !!v.doc_type_id },
+      { name: 'category', label: 'Category', type: 'select', noEmpty: true, options: ['KYC', 'Certificate', 'Personal', 'Medical', 'Other'], full: true, hidden: (v) => !!v.doc_type_id },
+      { name: 'expires_on', label: 'Expires on (if any)', type: 'date' },
     ];
   const submit = async (e) => {
     e.preventDefault();
     if (!file && (!isHR || !values.content)) return toast(isHR ? 'Attach a file or enter content' : 'Please attach a file', 'error');
     setProgress(0);
     try {
-      await uploadForm('documents', values, file, setProgress);
+      const { audience_department: ad, audience_location: al, audience_company: ac, ...rest } = values;
+      const audienceId = { department: ad, location: al, company: ac }[values.audience_type];
+      await uploadForm('documents', { ...rest, audience_ids: audienceId ? JSON.stringify([audienceId]) : '' }, file, setProgress);
       toast(isHR ? 'Document published' : 'Document uploaded — HR has been notified');
       invalidateFiles('documents');
       onClose();
@@ -137,12 +152,18 @@ export default function Documents() {
   const [del, setDel] = useState(null);
   const [q, setQ] = useState('');
   const [acks, setAcks] = useState(null);
+  const [versionOf, setVersionOf] = useState(null);
+  const [historyOf, setHistoryOf] = useState(null);
+  const [signing, setSigning] = useState(null);
+  const bulk = useDisclosure();
   const { data: ackData } = useGet(acks ? `hr/documents/${acks.id}/acknowledgements` : null);
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') || 'docs';
   const pendingAcks = data.filter((d) => d.requires_ack && !d.acknowledged && !d.employee_id).length;
   const filtered = data.filter((d) => !q || `${d.title} ${d.category} ${d.file_name || ''}`.toLowerCase().includes(q.toLowerCase()));
   const company = filtered.filter((d) => !d.employee_id);
+  const folders = company.reduce((m, d) => ({ ...m, [d.folder || 'General']: [...(m[d.folder || 'General'] || []), d] }), {});
+  const toSign = data.filter((d) => d.requires_signature && !d.signed_at && d.employee_id === user.id).length;
   const personal = filtered.filter((d) => d.employee_id);
 
   const fileOf = (d) => ({ id: d.file_id, original_name: d.file_name, mime_type: d.file_type, size: d.file_size });
@@ -161,6 +182,11 @@ export default function Documents() {
         <div className="mt-0.5 line-clamp-2 text-xs muted">{d.content || d.file_name}</div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <Badge color="slate">{d.category}</Badge>
+          {d.version > 1 && <Badge color="blue">v{d.version}</Badge>}
+          {isHR && !d.employee_id && d.audience_type && d.audience_type !== 'all' && <Badge color="violet">{d.audience_type === 'department' ? 'Department only' : d.audience_type === 'location' ? 'Location only' : 'Entity only'}</Badge>}
+          {d.verification && <Badge status={d.verification === 'verified' ? 'approved' : d.verification === 'rejected' ? 'rejected' : 'pending'}>{d.verification === 'verified' ? 'Verified' : d.verification === 'rejected' ? 'Sent back' : 'Awaiting verification'}</Badge>}
+          {d.expires_on && <Badge color={d.expires_on < new Date().toISOString().slice(0, 10) ? 'red' : 'slate'}>Expires {date(d.expires_on)}</Badge>}
+          {d.requires_signature && (d.signed_at ? <Badge color="green">Signed</Badge> : <Badge color="amber">Signature needed</Badge>)}
           {d.requires_ack && !d.acknowledged ? <Badge color="amber" data-testid="ack-required">Action required</Badge> : null}
           {d.requires_ack && d.acknowledged ? <Badge color="green">Acknowledged</Badge> : null}
           {isHR && d.requires_ack ? <button className="text-[11px] font-semibold text-brand-600 hover:underline" onClick={(e) => { e.stopPropagation(); setAcks(d); }} data-testid="ack-progress">{d.ack_count}/{d.ack_total} acknowledged</button> : null}
@@ -170,6 +196,9 @@ export default function Documents() {
       </div>
       <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
         {d.file_id && isPreviewable(d.file_type) && <button className="btn-ghost btn-sm !px-1.5" aria-label={`Preview ${d.title}`} onClick={() => setPreview(fileOf(d))}><Eye size={15} /></button>}
+        {d.requires_signature && !d.signed_at && d.employee_id === user.id && <button className="btn-primary btn-sm" onClick={() => setSigning(d)} data-testid="sign-document"><PenLine size={14} /> Sign</button>}
+        {d.version > 1 && <button className="btn-ghost btn-sm !px-1.5" aria-label={`Versions of ${d.title}`} onClick={() => setHistoryOf(d)}><History size={15} /></button>}
+        {(isHR || d.employee_id === user.id) && d.file_id && <button className="btn-ghost btn-sm !px-1.5" aria-label={`Upload new version of ${d.title}`} onClick={() => setVersionOf(d)} data-testid="new-version"><Upload size={15} /></button>}
         {d.requires_ack && !d.acknowledged && <button className="btn-primary btn-sm" onClick={() => act(`hr/documents/${d.id}/acknowledge`, { success: `Acknowledged: ${d.title}`, invalidates: ['documents'] })} data-testid="acknowledge-btn">Acknowledge</button>}
         {d.file_id && <button className="btn-ghost btn-sm !px-1.5" aria-label={`Download ${d.title}`} onClick={() => downloadAttachment(d.file_id, d.file_name).catch((e) => toast(e.message, 'error'))}><Download size={15} /></button>}
         {canDelete(d) && <button className="btn-ghost btn-sm !px-1.5 opacity-0 transition group-hover:opacity-100 hover:text-rose-500 focus:opacity-100" aria-label={`Delete ${d.title}`} onClick={() => setDel(d)}><Trash2 size={15} /></button>}
@@ -185,17 +214,30 @@ export default function Documents() {
           <button className="btn-primary" onClick={() => add.onOpen()} data-testid="upload-document"><Upload size={16} /> Upload</button>
         </>} />
       <Tabs value={tab} onChange={(t) => setParams({ tab: t })} tabs={[
-        { value: 'docs', label: 'Documents', count: pendingAcks || undefined },
+        { value: 'docs', label: 'Documents', count: pendingAcks + toSign || undefined },
+        { value: 'checklist', label: 'My checklist' },
+        ...(isHR ? [{ value: 'compliance', label: 'Compliance' }] : []),
         { value: 'requests', label: 'Letter requests' },
         ...(isHR ? [{ value: 'templates', label: 'Letter templates' }] : []),
       ]} />
-      {tab === 'requests' && <LetterRequests />}
+      {tab === 'checklist' && <Checklist />}
+      {tab === 'compliance' && isHR && <Compliance />}
+      {tab === 'requests' && <>{isHR && <div className="flex justify-end"><button className="btn-secondary" onClick={() => bulk.onOpen()} data-testid="bulk-letters"><Files size={16} /> Bulk letters</button></div>}<LetterRequests /></>}
       {tab === 'templates' && isHR && <LetterTemplates />}
       {tab === 'docs' && (isLoading ? <CardSkeleton lines={5} /> : (
         <>
           <section>
             <h2 className="mb-3 flex items-center gap-2 font-semibold"><BookOpen size={16} className="text-brand-500" /> Company policies</h2>
-            {company.length === 0 ? <div className="card"><EmptyState title="No policies found" /></div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{company.map((d) => <Card key={d.id} d={d} />)}</div>}
+            {company.length === 0 ? <div className="card"><EmptyState title="No policies found" /></div> : (
+              <div className="space-y-5">
+                {Object.entries(folders).sort(([a], [b]) => a.localeCompare(b)).map(([folder, docs]) => (
+                  <div key={folder} data-testid="folder">
+                    <h3 className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-400"><Folder size={13} /> {folder} <span className="font-normal">({docs.length})</span></h3>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{docs.map((d) => <Card key={d.id} d={d} />)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
           <section>
             <h2 className="mb-3 flex items-center gap-2 font-semibold"><User size={16} className="text-brand-500" /> {isHR ? 'Personal documents' : 'My documents'}</h2>
@@ -222,6 +264,10 @@ export default function Documents() {
       </Modal>
       <FilePreview file={preview} onClose={() => setPreview(null)} />
       <UploadModal open={add.open} onClose={add.onClose} />
+      <VersionUpload doc={versionOf} onClose={() => setVersionOf(null)} />
+      <VersionsModal doc={historyOf} onClose={() => setHistoryOf(null)} />
+      <SignModal doc={signing} onClose={() => setSigning(null)} />
+      <BulkLetters open={bulk.open} onClose={bulk.onClose} />
       <Confirm open={!!del} onClose={() => setDel(null)} danger title="Delete document?" confirmLabel="Delete" message={del ? `“${del.title}” and its file will be permanently removed.` : ''}
         onConfirm={() => act(`documents/${del.id}`, { method: 'DELETE', success: 'Document deleted' })} />
     </div>

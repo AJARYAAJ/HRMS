@@ -1,5 +1,7 @@
 node_modules
-dist
+/dist
+client/dist
+server/dist
 server/data
 test-results
 playwright-report

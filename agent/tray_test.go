@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"image/png"
 	"strings"
@@ -131,7 +132,7 @@ func TestAgentPauseAndResume(t *testing.T) {
 	ts := newFakeHTTP(t, srv)
 	p := &scriptedPlatform{w: Window{App: "Code"}}
 	a, clock := newTestAgent(t, ts, p)
-	a.refreshConfig(t.Context())
+	a.refreshConfig(context.Background())
 	step(a, clock, 2*time.Minute)
 	a.Pause(15 * time.Minute)
 	if st := a.TrayState(); st.Status != "paused" || !st.AllowPause {
@@ -160,7 +161,7 @@ func TestAgentPauseAndResume(t *testing.T) {
 	// Not allowed by the organisation: Pause is ignored.
 	srv2 := &fakeServer{}
 	a2, _ := newTestAgent(t, newFakeHTTP(t, srv2), &scriptedPlatform{w: Window{App: "Code"}})
-	a2.refreshConfig(t.Context())
+	a2.refreshConfig(context.Background())
 	a2.Pause(time.Hour)
 	if a2.TrayState().Status == "paused" {
 		t.Fatal("pause must be ignored when not allowed")

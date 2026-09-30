@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { all, get, insert, update, run, tx } from '../db.js';
 import { requireRole, scopeSql, isHR, canManage } from '../auth.js';
 import { crud } from '../crud.js';
-import { monthRange, workingDaysBetween, offDayChecker, parseDate, computePayslip, httpError, audit, notify, round2, today } from '../utils.js';
+import { monthRange, workingDaysBetween, offDayChecker, parseDate, httpError, audit, notify, round2, today } from '../utils.js';
+import { computeSalary, structureFor } from '../salary.js';
 import { taxProfile, payrollSettings, fyOf, fyMonths } from '../tax.js';
 
 export const payrollRouter = Router();
@@ -61,7 +62,6 @@ function processCompanyPayroll(month, companyId, userId) {
   if (existing?.status === 'paid') return { skipped: true, run: existing };
   const { start, end } = monthRange(month);
   const workingDays = workingDaysBetween(start, end);
-  const settings = payrollSettings();
   const fy = fyOf(start);
   const emps = all(
     `SELECT * FROM employees WHERE annual_ctc > 0 AND date_of_joining <= ? AND (status != 'exited' OR exit_date >= ?) AND company_id IS ?`,
@@ -75,7 +75,10 @@ function processCompanyPayroll(month, companyId, userId) {
       const lop = lopDays(e.id, start, end, end < today() ? end : today(), workingDays, e.date_of_joining);
       const paid = Math.max(0, workingDays - lop);
       const tax = taxProfile(e, fy);
-      const slip = computePayslip(e.annual_ctc, workingDays, paid, { ...settings, annualTax: tax.annual_tax });
+      const structure = structureFor(e.id);
+      const calc = computeSalary(structure, e.annual_ctc, { workingDays, paidDays: paid, annualTax: tax.annual_tax });
+      const { basic, hra, special, gross: g, pf, esi, pt, tds, total_deductions: td, net: n } = calc;
+      const slip = { basic, hra, special, gross: g, pf, esi, pt, tds, total_deductions: td, net: n };
       // Approved, not-yet-paid expense claims are reimbursed with salary.
       const claims = all("SELECT id, amount FROM expenses WHERE employee_id = ? AND status = 'approved' AND payslip_id IS NULL", e.id);
       const reimbursement = round2(claims.reduce((a, c) => a + c.amount, 0));
@@ -88,7 +91,13 @@ function processCompanyPayroll(month, companyId, userId) {
       const slipId = insert('payslips', {
         run_id: id, employee_id: e.id, company_id: companyId, month, working_days: workingDays, paid_days: paid, lop_days: lop,
         ...slip, total_deductions: totalDeductions, net: netPay, reimbursement, loan_deduction: loanDeduction, tax_regime: tax.selected,
+        structure_name: calc.structure, employer_pf: calc.employer.pf, employer_esi: calc.employer.esi, gratuity: calc.employer.gratuity,
       });
+      // Component-wise lines as they appear on the payslip.
+      calc.lines.forEach((l, i) => insert('payslip_lines', { payslip_id: slipId, code: l.code, name: l.name, type: l.type, amount: l.amount, sort: i }));
+      if (loanDeduction) insert('payslip_lines', { payslip_id: slipId, code: 'LOAN', name: 'Loan / advance EMI', type: 'deduction', amount: loanDeduction, sort: 90 });
+      [['EMP_PF', 'Employer PF', calc.employer.pf], ['EMP_ESI', 'Employer ESI', calc.employer.esi], ['GRATUITY', 'Gratuity provision', calc.employer.gratuity]]
+        .forEach(([code, name, amount], i) => amount && insert('payslip_lines', { payslip_id: slipId, code, name, type: 'employer', amount, sort: 100 + i }));
       for (const c of claims) run("UPDATE expenses SET status = 'reimbursed', payslip_id = ? WHERE id = ?", slipId, c.id);
       for (const { loan, amount } of emis) {
         insert('loan_repayments', { loan_id: loan.id, payslip_id: slipId, month, amount });
@@ -187,18 +196,18 @@ payrollRouter.get('/payslips/:id', (req, res) => {
     `SELECT lr.amount, l.type, l.outstanding FROM loan_repayments lr JOIN loans l ON l.id = lr.loan_id WHERE lr.payslip_id = ?`, slip.id,
   );
   const reimbursed = all('SELECT id, category, amount, date FROM expenses WHERE payslip_id = ?', slip.id);
-  res.json({ ...slip, company: companyDetails(slip.company_id), loans, reimbursed });
+  const lines = all('SELECT code, name, type, amount FROM payslip_lines WHERE payslip_id = ? ORDER BY sort, id', slip.id);
+  res.json({ ...slip, company: companyDetails(slip.company_id), loans, reimbursed, lines });
 });
 
 payrollRouter.get('/salaries', requireRole('admin', 'hr'), (req, res) => {
-  const settings = payrollSettings();
   res.json(all(
     `SELECT e.id, e.emp_code, e.first_name || ' ' || e.last_name AS employee_name, e.annual_ctc, e.avatar_color, e.tax_regime,
             d.name AS department, g.title AS designation, c.name AS company_name
      FROM employees e LEFT JOIN departments d ON d.id = e.department_id LEFT JOIN designations g ON g.id = e.designation_id
      LEFT JOIN companies c ON c.id = e.company_id
      WHERE e.status != 'exited' ORDER BY e.first_name`,
-  ).map((r) => ({ ...r, monthly: computePayslip(r.annual_ctc, 1, 1, settings) })));
+  ).map((r) => { const st = structureFor(r.id); return { ...r, structure: st.name, monthly: computeSalary(st, r.annual_ctc) }; }));
 });
 
 payrollRouter.put('/salaries/:id', requireRole('admin', 'hr'), (req, res) => {
@@ -219,6 +228,12 @@ payrollRouter.put('/settings', requireRole('admin', 'hr'), (req, res) => {
   if (!(basic >= 30 && basic <= 70)) throw httpError(400, 'Basic must be between 30% and 70% of CTC');
   if (!(hra >= 0 && hra <= 50)) throw httpError(400, 'HRA must be between 0% and 50% of basic');
   run("INSERT OR REPLACE INTO settings (key, value) VALUES ('payroll_basic_pct', ?), ('payroll_hra_pct', ?)", String(basic), String(hra));
+  // Keep the default salary structure in step with these quick settings.
+  const def = get('SELECT id FROM salary_structures ORDER BY is_default DESC, id LIMIT 1');
+  if (def) {
+    run("UPDATE salary_components SET value = ? WHERE structure_id = ? AND code = 'BASIC' AND calc = 'percent_ctc'", basic, def.id);
+    run("UPDATE salary_components SET value = ? WHERE structure_id = ? AND code = 'HRA' AND calc = 'percent_basic'", hra, def.id);
+  }
   audit(req.user.id, 'update', 'settings', null, { payroll_basic_pct: basic, payroll_hra_pct: hra });
   res.json(payrollSettings());
 });
@@ -226,7 +241,8 @@ payrollRouter.put('/settings', requireRole('admin', 'hr'), (req, res) => {
 payrollRouter.get('/preview', (req, res) => {
   const emp = get('SELECT * FROM employees WHERE id = ?', req.user.id);
   const tax = taxProfile(emp, fyOf(today()));
-  res.json({ annual_ctc: emp.annual_ctc, monthly: computePayslip(emp.annual_ctc, 1, 1, { ...payrollSettings(), annualTax: tax.annual_tax }), annual_tax: tax.annual_tax, regime: tax.selected });
+  const st = structureFor(emp.id);
+  res.json({ annual_ctc: emp.annual_ctc, structure: st.name, monthly: computeSalary(st, emp.annual_ctc, { annualTax: tax.annual_tax }), annual_tax: tax.annual_tax, regime: tax.selected });
 });
 
 // Old vs new regime comparison (pending declarations included so employees can plan before HR verifies).

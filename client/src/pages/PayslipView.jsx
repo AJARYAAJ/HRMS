@@ -23,8 +23,13 @@ export default function PayslipView() {
   if (isLoading) return <CardSkeleton lines={12} />;
   if (error) return <div className="card"><EmptyState title="Payslip not available" message={error?.data?.error} /></div>;
   const c = s.company || {};
-  const earnings = [['Basic salary', s.basic], ['House rent allowance', s.hra], ['Special allowance', s.special]];
-  const deductions = [['Provident fund', s.pf], ['ESI', s.esi], ['Professional tax', s.pt], [`Income tax (TDS · ${s.tax_regime === 'old' ? 'old' : 'new'} regime)`, s.tds], ...(s.loan_deduction ? [['Loan / advance EMI', s.loan_deduction]] : [])];
+  // Payslips from salary structures carry component-wise lines; older ones fall back to the fixed three components.
+  const hasLines = s.lines?.length > 0;
+  const earnings = hasLines ? s.lines.filter((l) => l.type === 'earning').map((l) => [l.name, l.amount])
+    : [['Basic salary', s.basic], ['House rent allowance', s.hra], ['Special allowance', s.special]];
+  const deductions = hasLines ? s.lines.filter((l) => l.type === 'deduction').map((l) => [l.code === 'TDS' ? `Income tax (TDS · ${s.tax_regime === 'old' ? 'old' : 'new'} regime)` : l.name, l.amount])
+    : [['Provident fund', s.pf], ['ESI', s.esi], ['Professional tax', s.pt], [`Income tax (TDS · ${s.tax_regime === 'old' ? 'old' : 'new'} regime)`, s.tds], ...(s.loan_deduction ? [['Loan / advance EMI', s.loan_deduction]] : [])];
+  const employer = hasLines ? s.lines.filter((l) => l.type === 'employer') : [];
   return (
     <div className="mx-auto max-w-4xl space-y-4">
       <div className="no-print flex items-center justify-between">
@@ -59,6 +64,13 @@ export default function PayslipView() {
             </div>
           ))}
         </div>
+        {employer.length > 0 && (
+          <div className="mx-6 mb-4 rounded-xl bg-slate-50 p-4 text-sm dark:bg-slate-800/50" data-testid="employer-contributions">
+            <div className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">Employer contributions{s.structure_name ? ` · ${s.structure_name}` : ''}</div>
+            {employer.map((l) => <div key={l.code} className="flex justify-between py-1"><span>{l.name}</span><span className="font-medium">{money(l.amount, true)}</span></div>)}
+            <p className="mt-1 text-xs muted">Paid by the company in addition to your take-home; shown for transparency.</p>
+          </div>
+        )}
         {s.reimbursement > 0 && (
           <div className="mx-6 mb-4 rounded-xl border border-slate-100 p-4 text-sm dark:border-slate-800" data-testid="reimbursements">
             <div className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">Reimbursements (non-taxable)</div>

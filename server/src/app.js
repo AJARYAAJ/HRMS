@@ -21,6 +21,7 @@ import { exportsRouter } from './routes/exports.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { policiesRouter } from './routes/policies.js';
 import { idCardsRouter, publicVerifyRouter } from './routes/idcards.js';
+import { salaryRouter } from './routes/salary.js';
 import { assetsRouter, assetRequestsRouter } from './routes/assets.js';
 import { docsExtraRouter, documentTypesRouter } from './routes/docs.js';
 import { preboardingRouter, joinRouter, onboardingTemplatesRouter, myOnboarding, setBuddy } from './routes/preboarding.js';
@@ -86,6 +87,7 @@ export function createApp() {
   api.use('/analytics', analyticsRouter);
   api.use('/policies', policiesRouter);
   api.use('/id-cards', idCardsRouter);
+  api.use('/salary', salaryRouter);
   api.use('/preboarding', preboardingRouter);
   api.use('/onboarding-templates', onboardingTemplatesRouter);
   api.get('/onboarding/my', myOnboarding);

@@ -38,9 +38,11 @@ function Overview() {
             <div className="grid gap-6 md:grid-cols-2">
               <div className="space-y-2.5 text-sm">
                 <div className="flex justify-between rounded-xl bg-brand-50 p-3 font-semibold text-brand-800 dark:bg-brand-500/10 dark:text-brand-300"><span>Annual CTC</span><span>{money(preview.annual_ctc)}</span></div>
-                {[['Basic', m.basic], ['HRA', m.hra], ['Special allowance', m.special]].map(([l, v]) => <div key={l} className="flex justify-between px-3"><span className="muted">{l}</span><span className="font-medium">{money(v)}</span></div>)}
+                {preview.structure && <div className="px-3 text-xs muted" data-testid="my-structure">Salary structure: <b>{preview.structure}</b></div>}
+                {(m.lines ? m.lines.filter((l) => l.type === 'earning').map((l) => [l.name, l.amount]) : [['Basic', m.basic], ['HRA', m.hra], ['Special allowance', m.special]])
+                  .map(([l, v]) => <div key={l} className="flex justify-between px-3"><span className="muted">{l}</span><span className="font-medium">{money(v)}</span></div>)}
                 <div className="flex justify-between border-t border-slate-100 px-3 pt-2 font-semibold dark:border-slate-800"><span>Gross / month</span><span>{money(m.gross)}</span></div>
-                {[['Provident fund', m.pf], ['ESI', m.esi], ['Professional tax', m.pt], ['TDS', m.tds]].map(([l, v]) => <div key={l} className="flex justify-between px-3 text-rose-600 dark:text-rose-400"><span>− {l}</span><span>{money(v)}</span></div>)}
+                {(m.lines ? m.lines.filter((l) => l.type === 'deduction').map((l) => [l.name, l.amount]) : [['Provident fund', m.pf], ['ESI', m.esi], ['Professional tax', m.pt], ['TDS', m.tds]]).map(([l, v]) => <div key={l} className="flex justify-between px-3 text-rose-600 dark:text-rose-400"><span>− {l}</span><span>{money(v)}</span></div>)}
                 <div className="flex justify-between rounded-xl bg-emerald-50 p-3 font-bold text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"><span>Take-home / month</span><span data-testid="take-home">{money(m.net)}</span></div>
                 <p className="px-3 text-xs muted">Estimated annual tax (new regime): {money(preview.annual_tax)}</p>
               </div>

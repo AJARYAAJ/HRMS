@@ -1115,3 +1115,42 @@ CREATE TABLE IF NOT EXISTS document_types (
   has_expiry INTEGER DEFAULT 0,
   description TEXT
 );
+
+-- ---------- salary structures ----------
+CREATE TABLE IF NOT EXISTS salary_structures (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  is_default INTEGER DEFAULT 0,
+  pf_enabled INTEGER DEFAULT 1,
+  pf_wage_cap REAL DEFAULT 15000,                -- PF on basic up to this (NULL = full basic)
+  pf_employer_in_ctc INTEGER DEFAULT 0,          -- employer PF is part of CTC
+  esi_enabled INTEGER DEFAULT 1,
+  esi_threshold REAL DEFAULT 21000,
+  pt_enabled INTEGER DEFAULT 1,
+  gratuity_in_ctc INTEGER DEFAULT 0,             -- 4.81% of basic set aside within CTC
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS salary_components (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  structure_id INTEGER NOT NULL REFERENCES salary_structures(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  code TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'earning',          -- earning | deduction
+  calc TEXT NOT NULL DEFAULT 'fixed',            -- percent_ctc | percent_basic | fixed | balance
+  value REAL DEFAULT 0,
+  taxable INTEGER DEFAULT 1,
+  sort INTEGER DEFAULT 0,
+  UNIQUE(structure_id, code)
+);
+
+CREATE TABLE IF NOT EXISTS payslip_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  payslip_id INTEGER NOT NULL REFERENCES payslips(id) ON DELETE CASCADE,
+  code TEXT NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,                            -- earning | deduction | employer
+  amount REAL NOT NULL,
+  sort INTEGER DEFAULT 0
+);

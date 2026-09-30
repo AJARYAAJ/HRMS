@@ -148,6 +148,21 @@ export function seed({ reset = true } = {}) {
       ['Maternity Leave', 'ML', 0, 1, 0, '#ec4899'], ['Paternity Leave', 'PL', 0, 1, 0, '#8b5cf6']]
       .forEach(([name, code, annual_quota, paid, carry_forward, color]) => insert('leave_types', { name, code, annual_quota, paid, carry_forward, color }));
 
+    // ---------- salary structures ----------
+    const structure = (name, description, o, comps) => {
+      const id = insert('salary_structures', { name, description, ...o });
+      comps.forEach(([cname, code, type, calc, value], sort) => insert('salary_components', { structure_id: id, name: cname, code, type, calc, value, taxable: 1, sort }));
+      return id;
+    };
+    structure('Standard', 'Gross equals CTC; employer contributions paid on top', { is_default: 1, pf_employer_in_ctc: 0, gratuity_in_ctc: 0 }, [
+      ['Basic', 'BASIC', 'earning', 'percent_ctc', 50], ['House rent allowance', 'HRA', 'earning', 'percent_basic', 40], ['Special allowance', 'SPECIAL', 'earning', 'balance', 0],
+    ]);
+    const ctcStructure = structure('CTC incl. employer PF & gratuity', 'Sales and field roles: employer PF and gratuity are carved out of CTC', { pf_employer_in_ctc: 1, gratuity_in_ctc: 1 }, [
+      ['Basic', 'BASIC', 'earning', 'percent_ctc', 40], ['House rent allowance', 'HRA', 'earning', 'percent_basic', 50], ['Conveyance allowance', 'CONV', 'earning', 'fixed', 1600],
+      ['Medical allowance', 'MED', 'earning', 'fixed', 1250], ['Leave travel allowance', 'LTA', 'earning', 'percent_basic', 8.33], ['Special allowance', 'SPECIAL', 'earning', 'balance', 0],
+      ['Group health insurance', 'GHI', 'deduction', 'fixed', 450],
+    ]);
+
     // ---------- policies: plans that are assigned to employees (Keka-style) ----------
     const lt = Object.fromEntries(all('SELECT id, code FROM leave_types').map((t) => [t.code, t.id]));
     const rule = (plan_id, code, annual_quota, o = {}) => insert('leave_plan_rules', {
@@ -286,7 +301,7 @@ export function seed({ reset = true } = {}) {
         exit_date: ymd(addDays(today, -between(30, 200))), annual_ctc: 700000 });
     }
 
-    run('UPDATE employees SET attendance_policy_id = ?, expense_policy_id = ? WHERE department_id = ?', fieldAtt, salesExp, dept.Sales);
+    run('UPDATE employees SET attendance_policy_id = ?, expense_policy_id = ?, salary_structure_id = ? WHERE department_id = ?', fieldAtt, salesExp, ctcStructure, dept.Sales);
     run("UPDATE employees SET leave_plan_id = ? WHERE employment_type IN ('Contract', 'Intern')", internPlan);
     const emps = all("SELECT e.*, d.name AS dept FROM employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.status != 'exited'");
     for (const e of emps) {

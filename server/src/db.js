@@ -49,6 +49,11 @@ export function migrate() {
   addColumn('documents', 'signature', "TEXT");
   addColumn('documents', 'expiry_reminded_at', "TEXT");
   addColumn('documents', 'updated_at', "TEXT");
+  addColumn('employees', 'salary_structure_id', 'INTEGER');
+  addColumn('payslips', 'structure_name', 'TEXT');
+  addColumn('payslips', 'employer_pf', 'REAL DEFAULT 0');
+  addColumn('payslips', 'employer_esi', 'REAL DEFAULT 0');
+  addColumn('payslips', 'gratuity', 'REAL DEFAULT 0');
   addColumn('employees', 'buddy_id', 'INTEGER');
   addColumn('onboarding_tasks', 'done_at', 'TEXT');
   addColumn('onboarding_tasks', 'done_by', 'INTEGER');

@@ -28,7 +28,7 @@ test.describe.serial('Payroll', () => {
     const drawer = page.getByRole('dialog', { name: `Payslips · ${monthLabel()} · Nimbus Technologies` });
     await expect(drawer.getByTestId('table-row').first()).toBeVisible();
     await page.keyboard.press('Escape');
-    await page.getByRole('tab', { name: 'Salary structures' }).click();
+    await page.getByRole('tab', { name: 'Employee salaries' }).click();
     await page.getByLabel('Search table').fill('Ananya');
     await expect(page.getByTestId('table-row')).toHaveCount(1);
     await page.getByTestId('table-row').first().getByRole('button', { name: 'Revise salary' }).click();

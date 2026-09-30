@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Banknote, Play, CheckCircle2, Users, Wallet, Receipt, Pencil, ChevronRight, Download } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { useGet, useAction, useDisclosure, useToast } from '../lib/hooks';
+import SalaryStructures from './SalaryStructures';
 import { PageHeader, Tabs, StatCard, StatSkeletons, Badge, Avatar, Modal, Confirm, Drawer, CardSkeleton } from '../components/ui';
 import DataTable from '../components/DataTable';
 import { FormModal } from '../components/Form';
@@ -142,6 +143,7 @@ function Salaries() {
         columns={[
           { key: 'employee_name', header: 'Employee', width: 'minmax(220px, 2fr)', render: (r) => <div className="flex items-center gap-2"><Avatar name={r.employee_name} color={r.avatar_color} size="sm" /><div className="min-w-0"><div className="truncate font-semibold">{r.employee_name}</div><div className="truncate text-xs muted">{r.designation}</div></div></div> },
           { key: 'department', header: 'Department' },
+          { key: 'structure', header: 'Structure', render: (r) => <span className="text-xs">{r.structure}</span> },
           { key: 'annual_ctc', header: 'Annual CTC', align: 'right', render: (r) => <b>{money(r.annual_ctc)}</b> },
           { key: 'basic', header: 'Basic / mo', align: 'right', sortValue: (r) => r.monthly.basic, render: (r) => money(r.monthly.basic), csv: (r) => r.monthly.basic },
           { key: 'gross', header: 'Gross / mo', align: 'right', sortValue: (r) => r.monthly.gross, render: (r) => money(r.monthly.gross), csv: (r) => r.monthly.gross },
@@ -224,9 +226,10 @@ export default function Payroll() {
   return (
     <div>
       <PageHeader icon={Banknote} title="Payroll" subtitle="Process monthly payroll, manage salary structures and verify tax proofs" />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'runs', label: 'Payroll runs' }, { value: 'salaries', label: 'Salary structures' }, { value: 'loans', label: 'Loans & advances' }, { value: 'tax', label: 'Tax declarations' }, { value: 'settings', label: 'Settings' }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'runs', label: 'Payroll runs' }, { value: 'salaries', label: 'Employee salaries' }, { value: 'structures', label: 'Salary templates' }, { value: 'loans', label: 'Loans & advances' }, { value: 'tax', label: 'Tax declarations' }, { value: 'settings', label: 'Settings' }]} />
       {tab === 'runs' && <Runs />}
       {tab === 'salaries' && <Salaries />}
+      {tab === 'structures' && <SalaryStructures />}
       {tab === 'tax' && <TaxApprovals />}
       {tab === 'loans' && <AllLoans />}
       {tab === 'settings' && <PayrollSettings />}

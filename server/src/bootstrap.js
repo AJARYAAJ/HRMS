@@ -37,6 +37,9 @@ export function bootstrapProduction(env = process.env) {
         carry_forward_cap: t.carry_forward ? 30 : 0, encashable: t.carry_forward, allow_half_day: 1, min_notice_days: 0, probation_allowed: 1, sandwich: 0,
       });
     }
+    const st = insert('salary_structures', { name: 'Standard', description: 'Gross equals CTC', is_default: 1 });
+    [['Basic', 'BASIC', 'percent_ctc', 50], ['House rent allowance', 'HRA', 'percent_basic', 40], ['Special allowance', 'SPECIAL', 'balance', 0]]
+      .forEach(([name, code, calc, value], sort) => insert('salary_components', { structure_id: st, name, code, type: 'earning', calc, value, taxable: 1, sort }));
     insert('holiday_lists', { name: 'Company holidays', description: 'Add this year\'s holidays in Policies & settings', optional_limit: 2, is_default: 1 });
     insert('weekly_off_policies', { name: 'Saturday & Sunday off', pattern: JSON.stringify({ 0: 'all', 6: 'all' }), is_default: 1 });
     insert('attendance_policies', { name: 'Standard attendance', description: 'Office, remote and field clock-in', is_default: 1 });

@@ -2,7 +2,7 @@ import { lazy } from 'react';
 import {
   LayoutDashboard, CheckSquare, Clock, CalendarDays, Timer, Wallet, Receipt, LifeBuoy, FileText, GraduationCap, Laptop,
   Users, Network, UserPlus, Target, PartyPopper, Briefcase, Activity, Banknote, BarChart3, Building2, Settings, ShieldCheck, UserCircle,
-  LogOut, ListTodo, Plane, Calendar, CalendarRange,
+  LogOut, ListTodo, Plane, Calendar, CalendarRange, Building, FolderKanban, Crosshair, UsersRound, Landmark,
 } from 'lucide-react';
 
 // Every page is its own chunk; `load` is reused for hover-prefetching from the sidebar.
@@ -42,6 +42,12 @@ export const pages = {
   roster: page(() => import('./pages/Roster')),
   activityDetail: page(() => import('./pages/ActivityDetail')),
   taxStatement: page(() => import('./pages/TaxStatement')),
+  clients: page(() => import('./pages/Clients')),
+  projects: page(() => import('./pages/Projects')),
+  projectDetail: page(() => import('./pages/ProjectDetail')),
+  opportunities: page(() => import('./pages/Opportunities')),
+  resources: page(() => import('./pages/Resources')),
+  finance: page(() => import('./pages/Finance')),
 };
 
 const ALL = ['admin', 'hr', 'manager', 'employee'];
@@ -75,6 +81,13 @@ export const navGroups = [
     { path: '/performance', label: 'Performance', icon: Target, page: 'performance', roles: ALL },
     { path: '/engage', label: 'Engage', icon: PartyPopper, page: 'engage', roles: ALL },
   ] },
+  { label: 'Professional services', items: [
+    { path: '/projects', label: 'Projects', icon: FolderKanban, page: 'projects', roles: ALL },
+    { path: '/clients', label: 'Clients', icon: Building, page: 'clients', roles: MGR },
+    { path: '/opportunities', label: 'Opportunities', icon: Crosshair, page: 'opportunities', roles: MGR },
+    { path: '/resources', label: 'Resources', icon: UsersRound, page: 'resources', roles: MGR },
+    { path: '/finance', label: 'Finance', icon: Landmark, page: 'finance', roles: HR },
+  ] },
   { label: 'Talent & Insights', items: [
     { path: '/recruitment', label: 'Recruitment', icon: Briefcase, page: 'recruitment', roles: MGR },
     { path: '/roster', label: 'Shift roster', icon: CalendarRange, page: 'roster', roles: MGR },
@@ -96,6 +109,7 @@ export const hiddenRoutes = [
   { path: '/profile', page: 'profile', roles: ALL, label: 'My Profile', icon: UserCircle },
   { path: '/productivity/:id', page: 'activityDetail', roles: ALL },
   { path: '/tax-statement', page: 'taxStatement', roles: ALL },
+  { path: '/projects/:id', page: 'projectDetail', roles: ALL },
 ];
 
 export const allRoutes = [...navGroups.flatMap((g) => g.items), ...hiddenRoutes];

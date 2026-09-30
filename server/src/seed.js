@@ -386,15 +386,121 @@ export function seed({ reset = true } = {}) {
     }
 
     // ---------- projects & timesheets ----------
-    const projects = [['Atlas Payments Platform', 'Internal', 1200], ['Retail Mobile App', 'ShopKart India', 800], ['Data Warehouse Migration', 'FinServe Ltd', 600],
-      ['Customer Portal Revamp', 'Internal', 400], ['AI Support Assistant', 'Internal', 500]]
-      .map(([name, client, budget_hours]) => insert('projects', { name, client, status: 'active', start_date: ymd(addDays(today, -between(40, 120))), end_date: ymd(addDays(today, between(30, 150))), budget_hours }));
+    // Clients (professional services): the organisations projects are delivered for.
+    const clientSpecs = [
+      ['ShopKart India', 'SKI', 'Retail & e-commerce', 'accounts@shopkart.example', '29AAKCS1234F1Z5', 'Koramangala, Bengaluru 560034', 30, [['Meera Pillai', 'Head of Digital', 'meera.pillai@shopkart.example']]],
+      ['FinServe Ltd', 'FSL', 'Financial services', 'ap@finserve.example', '27AABCF5678K1Z2', 'BKC, Mumbai 400051', 45, [['Rajiv Menon', 'CTO', 'rajiv@finserve.example'], ['Sana Qureshi', 'Procurement', 'sana@finserve.example']]],
+      ['MediCare Plus', 'MCP', 'Healthcare', 'finance@medicare.example', '07AAFCM4321L1Z9', 'Saket, New Delhi 110017', 30, [['Dr. Vivek Rao', 'COO', 'vivek@medicare.example']]],
+      ['GreenGrid Energy', 'GGE', 'Energy', 'billing@greengrid.example', null, 'Hinjawadi, Pune 411057', 60, [['Nisha Kulkarni', 'Programme Director', 'nisha@greengrid.example']]],
+      ['Nimbus (internal)', 'INT', 'Internal', null, null, null, 0, []],
+    ];
+    const clientIds = {};
+    for (const [name, code, industry, email, gstin, billing_address, terms, contacts] of clientSpecs) {
+      const id = insert('clients', { name, code, industry, email, gstin, billing_address, payment_terms_days: terms, owner_id: engMgr, status: 'active' });
+      clientIds[name] = id;
+      contacts.forEach(([cname, designation, cemail], i) => insert('client_contacts', { client_id: id, name: cname, designation, email: cemail, is_primary: i === 0 ? 1 : 0 }));
+    }
+    const projectSpecs = [
+      ['Atlas Payments Platform', 'Nimbus (internal)', 'non_billable', 1200, null, 'on_track'],
+      ['Retail Mobile App', 'ShopKart India', 'time_materials', 2600, 5500000, 'on_track'],
+      ['Data Warehouse Migration', 'FinServe Ltd', 'fixed', 600, 1800000, 'at_risk'],
+      ['Customer Portal Revamp', 'MediCare Plus', 'time_materials', 900, 1800000, 'on_track'],
+      ['AI Support Assistant', 'Nimbus (internal)', 'non_billable', 500, null, 'on_track'],
+    ];
+    const projects = projectSpecs.map(([name, client, billing_type, budget_hours, budget_amount, health], i) => insert('projects', {
+      name, client, client_id: clientIds[client], code: `PRJ-${101 + i}`, billing_type, budget_hours, budget_amount, health, manager_id: engMgr, status: 'active',
+      start_date: ymd(addDays(today, -between(60, 120))), end_date: ymd(addDays(today, between(30, 150))),
+    }));
     for (const e of team) {
       for (let i = 13; i >= 1; i--) {
         const d = addDays(today, -i);
         if (isWeekend(d)) continue;
         insert('timesheets', { employee_id: e.id, project_id: pick(projects), date: ymd(d), hours: pick([4, 6, 7, 8, 8, 8]), task: pick(['API development', 'Code review', 'Bug fixes', 'Sprint planning', 'Testing', 'Documentation']),
           billable: rand() < 0.75 ? 1 : 0, status: i <= 3 ? 'pending' : 'approved', approver_id: i <= 3 ? null : engMgr });
+      }
+    }
+
+    // Project members with bill rates, milestones, allocations, opportunities and invoice history.
+    const rates = [2500, 2200, 1800, 1600, 1500, 1400, 1200];
+    projects.forEach((pid, pi) => {
+      run('INSERT OR IGNORE INTO project_members (project_id, employee_id, role, bill_rate) VALUES (?, ?, ?, ?)', pid, engMgr, 'Project manager', 3000);
+      team.forEach((e, ti) => {
+        if ((ti + pi) % 2 === 0 || pi === 1) run('INSERT OR IGNORE INTO project_members (project_id, employee_id, role, bill_rate) VALUES (?, ?, ?, ?)', pid, e.id, ti === 0 ? 'Tech lead' : 'Engineer', rates[ti % rates.length]);
+      });
+    });
+    // Everyone who logged time on a project is a member of it.
+    run('INSERT OR IGNORE INTO project_members (project_id, employee_id, role, bill_rate) SELECT DISTINCT project_id, employee_id, \'Engineer\', 1500 FROM timesheets WHERE project_id IS NOT NULL');
+    const dwh = projects[2];
+    [['Discovery & data audit', -50, 450000, 'invoiced'], ['Schema design sign-off', -20, 450000, 'completed'], ['Migration of core ledgers', 25, 600000, 'pending'], ['Cut-over & hypercare', 70, 300000, 'pending']]
+      .forEach(([name, due, amount, status]) => insert('project_milestones', { project_id: dwh, name, due_date: ymd(addDays(today, due)), amount, status, completed_on: status !== 'pending' ? ymd(addDays(today, due)) : null }));
+    team.forEach((e, i) => {
+      if (i === team.length - 1) return; // one engineer on the bench
+      insert('resource_allocations', { employee_id: e.id, project_id: projects[1 + (i % 3)], start_date: ymd(addDays(today, -30)), end_date: ymd(addDays(today, 45 + i * 7)), allocation_pct: i === 0 ? 60 : 100, billable: 1, role: i === 0 ? 'Tech lead' : 'Engineer', created_by: engMgr });
+      if (i === 0) insert('resource_allocations', { employee_id: e.id, project_id: projects[0], start_date: ymd(addDays(today, -30)), end_date: ymd(addDays(today, 60)), allocation_pct: 40, billable: 0, role: 'Architect', created_by: engMgr });
+      if (i === 1) insert('resource_allocations', { employee_id: e.id, project_id: projects[4], start_date: ymd(addDays(today, -10)), end_date: ymd(addDays(today, 20)), allocation_pct: 25, billable: 0, role: 'Advisor', created_by: engMgr }); // overallocated
+    });
+    const oppSpecs = [
+      ['ShopKart loyalty programme', 'ShopKart India', null, 'negotiation', 1800000, 20, 'Existing client'],
+      ['FinServe risk dashboard', 'FinServe Ltd', null, 'proposal', 950000, 35, 'Existing client'],
+      ['MediCare telehealth app', 'MediCare Plus', null, 'qualified', 3200000, 50, 'Referral'],
+      ['GreenGrid IoT analytics', 'GreenGrid Energy', null, 'lead', 2600000, 60, 'Website'],
+      ['EduNext LMS rebuild', null, 'EduNext Learning', 'lead', 1400000, 45, 'LinkedIn'],
+      ['Urban Mobility booking engine', null, 'Urban Mobility Co.', 'qualified', 2100000, 30, 'Conference'],
+      ['FinServe KYC automation', 'FinServe Ltd', null, 'won', 1250000, -12, 'Existing client'],
+      ['Lakeside Hotels website', null, 'Lakeside Hotels', 'lost', 600000, -25, 'Website'],
+      ['ShopKart warehouse app', 'ShopKart India', null, 'won', 900000, -40, 'Existing client'],
+      ['Harbor Logistics tracking', null, 'Harbor Logistics', 'proposal', 1750000, 15, 'Partner'],
+      ['PayQuick wallet audit', null, 'PayQuick', 'negotiation', 480000, 8, 'Referral'],
+    ];
+    const prob = { lead: 10, qualified: 25, proposal: 50, negotiation: 75, won: 100, lost: 0 };
+    for (const [name, client, prospect, stage, value, closeIn, source] of oppSpecs) {
+      insert('opportunities', {
+        name, client_id: client ? clientIds[client] : null, prospect, stage, value, probability: prob[stage], source, owner_id: pick([engMgr, ceo]),
+        expected_close: ymd(addDays(today, closeIn)), billing_type: stage === 'won' && value < 1000000 ? 'fixed' : 'time_materials',
+        closed_on: ['won', 'lost'].includes(stage) ? ymd(addDays(today, closeIn)) : null, lost_reason: stage === 'lost' ? 'Chose a lower-cost vendor' : null,
+        notes: `${source} lead. Decision maker engaged.`,
+      });
+    }
+    // Invoice history: paid, part-paid, overdue and recently sent invoices from earlier months.
+    let invNo = 1;
+    const mkInvoice = (clientName, projectId, daysAgo, lines, status, paidFraction = 0) => {
+      const issue = ymd(addDays(today, -daysAgo));
+      const terms = clientSpecs.find((c) => c[0] === clientName)[6];
+      const subtotal = lines.reduce((a, l) => a + l[1] * l[2], 0);
+      const tax = Math.round(subtotal * 0.18 * 100) / 100;
+      const total = subtotal + tax;
+      const paid = Math.round(total * paidFraction * 100) / 100;
+      const id = insert('invoices', {
+        number: `INV-${issue.slice(0, 4)}-${String(invNo++).padStart(4, '0')}`, client_id: clientIds[clientName], project_id: projectId, issue_date: issue,
+        due_date: ymd(addDays(today, -daysAgo + terms)), status, subtotal, tax_rate: 18, tax_amount: tax, total, amount_paid: paid, created_by: hr,
+        sent_at: `${issue} 10:00:00`, period_start: ymd(addDays(today, -daysAgo - 30)), period_end: ymd(addDays(today, -daysAgo - 1)),
+      });
+      for (const [description, quantity, rate, kind] of lines) insert('invoice_lines', { invoice_id: id, description, quantity, rate, amount: quantity * rate, kind: kind || 'other' });
+      if (paid) insert('invoice_payments', { invoice_id: id, amount: paid, date: ymd(addDays(today, -daysAgo + Math.min(terms, 20))), method: 'Bank transfer', reference: `UTR${between(100000000, 999999999)}`, created_by: hr });
+      return id;
+    };
+    mkInvoice('ShopKart India', projects[1], 150, [['Engineering services — sprint 1–4', 320, 2000]], 'paid', 1);
+    mkInvoice('ShopKart India', projects[1], 120, [['Engineering services — sprint 5–8', 300, 2000]], 'paid', 1);
+    mkInvoice('ShopKart India', projects[1], 90, [['Engineering services — sprint 9–12', 340, 2000]], 'paid', 1);
+    mkInvoice('MediCare Plus', projects[3], 75, [['Portal discovery & UX', 120, 1800]], 'paid', 1);
+    mkInvoice('ShopKart India', projects[1], 60, [['Engineering services — sprint 13–16', 310, 2000]], 'partially_paid', 0.5);
+    const dwhInv = mkInvoice('FinServe Ltd', dwh, 50, [['Milestone: Discovery & data audit', 1, 450000, 'milestone']], 'sent'); // 5 days overdue
+    run("UPDATE project_milestones SET invoice_id = ? WHERE project_id = ? AND status = 'invoiced'", dwhInv, dwh);
+    mkInvoice('MediCare Plus', projects[3], 35, [['Portal build — iteration 1', 160, 1700]], 'sent', 0); // overdue
+    mkInvoice('ShopKart India', projects[1], 20, [['Engineering services — sprint 17–18', 150, 2000]], 'sent', 0);
+    run("INSERT OR REPLACE INTO settings (key, value) VALUES ('invoice_tax_rate', '18')");
+    // History behind those invoices: approved, already-billed time, so project cost and margin are realistic.
+    const history = [[projects[1], team.slice(0, 3), 150, 21], [projects[3], team.slice(3, 5), 75, 36]];
+    for (const [pid, people, fromDays, toDays] of history) {
+      const invs = all('SELECT id, period_start, period_end FROM invoices WHERE project_id = ? ORDER BY period_start', pid);
+      for (let i = fromDays; i >= toDays; i--) {
+        const d = addDays(today, -i);
+        if (isWeekend(d)) continue;
+        const day = ymd(d);
+        const inv = invs.find((x) => x.period_start <= day && x.period_end >= day);
+        for (const e of people) {
+          insert('timesheets', { employee_id: e.id, project_id: pid, date: day, hours: 7, task: pick(['Feature development', 'Code review', 'Testing', 'Sprint planning']), billable: 1, status: 'approved', approver_id: engMgr, invoice_id: inv?.id ?? null });
+        }
       }
     }
 

@@ -782,3 +782,242 @@ CREATE INDEX IF NOT EXISTS idx_att_emp_date ON attendance(employee_id, date);
 CREATE INDEX IF NOT EXISTS idx_leave_emp ON leave_requests(employee_id);
 CREATE INDEX IF NOT EXISTS idx_notif_emp ON notifications(employee_id, read);
 CREATE INDEX IF NOT EXISTS idx_prod_emp_date ON productivity(employee_id, date);
+
+-- ---------- plans & policies (Keka-style: every employee is assigned one plan of each type) ----------
+CREATE TABLE IF NOT EXISTS leave_plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  is_default INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS leave_plan_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id INTEGER NOT NULL REFERENCES leave_plans(id) ON DELETE CASCADE,
+  leave_type_id INTEGER NOT NULL REFERENCES leave_types(id) ON DELETE CASCADE,
+  annual_quota REAL NOT NULL DEFAULT 0,
+  accrual TEXT NOT NULL DEFAULT 'yearly',      -- yearly (upfront, pro-rated for joiners) | monthly | none (e.g. LOP)
+  carry_forward_cap REAL DEFAULT 0,
+  encashable INTEGER DEFAULT 0,
+  allow_half_day INTEGER DEFAULT 1,
+  min_notice_days INTEGER DEFAULT 0,
+  max_consecutive REAL,
+  probation_allowed INTEGER DEFAULT 1,
+  sandwich INTEGER DEFAULT 0,                  -- weekends/holidays inside a leave count as leave
+  gender TEXT,                                 -- restrict to a gender (e.g. maternity)
+  UNIQUE(plan_id, leave_type_id)
+);
+
+CREATE TABLE IF NOT EXISTS holiday_lists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  optional_limit INTEGER DEFAULT 2,
+  is_default INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS weekly_off_policies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  pattern TEXT NOT NULL DEFAULT '{"0":"all","6":"all"}', -- weekday (0=Sun) -> "all" or weeks of the month, e.g. "2,4"
+  is_default INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS attendance_policies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  allow_web INTEGER DEFAULT 1,
+  allow_remote INTEGER DEFAULT 1,
+  allow_field INTEGER DEFAULT 1,
+  geofence_mode TEXT,                           -- NULL = organisation setting; off | flag | enforce
+  grace_minutes INTEGER,                        -- NULL = the shift's grace
+  full_day_hours REAL,                          -- NULL = 75% of the shift
+  half_day_hours REAL,                          -- NULL = 40% of the shift
+  late_penalty_every INTEGER DEFAULT 0,         -- every N late marks in a month...
+  late_penalty_days REAL DEFAULT 0.5,           -- ...deduct this many days
+  penalty_leave_type_id INTEGER REFERENCES leave_types(id) ON DELETE SET NULL, -- from this leave type (NULL = loss of pay)
+  max_regularizations INTEGER,                  -- per month (NULL = unlimited)
+  overtime_allowed INTEGER DEFAULT 1,
+  overtime_min_minutes INTEGER DEFAULT 30,
+  is_default INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS attendance_penalties (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  month TEXT NOT NULL,
+  late_count INTEGER NOT NULL,
+  days REAL NOT NULL,
+  leave_type_id INTEGER REFERENCES leave_types(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'applied',       -- applied | waived
+  decided_by INTEGER,
+  comment TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(employee_id, month)
+);
+
+CREATE TABLE IF NOT EXISTS expense_policies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  is_default INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS expense_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  policy_id INTEGER NOT NULL REFERENCES expense_policies(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'amount',          -- amount | mileage (rate per km) | per_diem (rate per day)
+  rate REAL,
+  per_claim_limit REAL,
+  monthly_limit REAL,
+  receipt_above REAL,                           -- a receipt is required when the claim exceeds this (0 = always)
+  UNIQUE(policy_id, name)
+);
+
+
+-- ---------- professional services (clients, projects, opportunities, resources, finance) ----------
+CREATE TABLE IF NOT EXISTS clients (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  code TEXT,
+  industry TEXT,
+  website TEXT,
+  email TEXT,
+  phone TEXT,
+  billing_address TEXT,
+  gstin TEXT,
+  currency TEXT DEFAULT 'INR',
+  payment_terms_days INTEGER DEFAULT 30,
+  status TEXT DEFAULT 'active',
+  owner_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  notes TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS client_contacts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  designation TEXT,
+  is_primary INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS project_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  role TEXT,
+  bill_rate REAL DEFAULT 0,           -- per hour, charged to the client
+  cost_rate REAL,                     -- per hour; NULL = derived from salary
+  UNIQUE(project_id, employee_id)
+);
+
+CREATE TABLE IF NOT EXISTS project_milestones (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  due_date TEXT,
+  amount REAL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | completed | invoiced
+  completed_on TEXT,
+  invoice_id INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS opportunities (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  prospect TEXT,                      -- organisation name when not yet a client
+  owner_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  stage TEXT NOT NULL DEFAULT 'lead', -- lead | qualified | proposal | negotiation | won | lost
+  value REAL DEFAULT 0,
+  probability INTEGER DEFAULT 10,
+  expected_close TEXT,
+  source TEXT,
+  billing_type TEXT DEFAULT 'time_materials',
+  notes TEXT,
+  lost_reason TEXT,
+  project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  closed_on TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS resource_allocations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  allocation_pct INTEGER NOT NULL DEFAULT 100,
+  billable INTEGER DEFAULT 1,
+  role TEXT,
+  notes TEXT,
+  created_by INTEGER,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS invoices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  number TEXT NOT NULL UNIQUE,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE RESTRICT,
+  project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  issue_date TEXT NOT NULL,
+  due_date TEXT NOT NULL,
+  period_start TEXT,
+  period_end TEXT,
+  status TEXT NOT NULL DEFAULT 'draft', -- draft | sent | partially_paid | paid | void
+  currency TEXT DEFAULT 'INR',
+  subtotal REAL DEFAULT 0,
+  tax_rate REAL DEFAULT 18,
+  tax_amount REAL DEFAULT 0,
+  total REAL DEFAULT 0,
+  amount_paid REAL DEFAULT 0,
+  notes TEXT,
+  created_by INTEGER,
+  sent_at TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS invoice_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+  kind TEXT DEFAULT 'other',          -- time | milestone | expense | other
+  description TEXT NOT NULL,
+  quantity REAL DEFAULT 1,
+  rate REAL DEFAULT 0,
+  amount REAL DEFAULT 0,
+  employee_id INTEGER,
+  milestone_id INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS invoice_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+  amount REAL NOT NULL,
+  date TEXT NOT NULL,
+  method TEXT,
+  reference TEXT,
+  created_by INTEGER,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS export_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  module TEXT NOT NULL,
+  format TEXT NOT NULL,
+  filters TEXT,
+  columns TEXT,
+  row_count INTEGER,
+  created_by INTEGER,
+  created_at TEXT DEFAULT (datetime('now'))
+);

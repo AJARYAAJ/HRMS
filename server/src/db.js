@@ -26,6 +26,27 @@ export function migrate() {
   addColumn('agent_devices', 'hostname', 'TEXT');
   addColumn('agent_devices', 'os', 'TEXT');
   addColumn('agent_devices', 'paused_until', 'TEXT');
+  // Plans & policies assigned to each employee (NULL = the default plan; holiday list falls back to the location's).
+  for (const col of ['leave_plan_id', 'holiday_list_id', 'weekly_off_policy_id', 'attendance_policy_id', 'expense_policy_id']) {
+    addColumn('employees', col, 'INTEGER');
+  }
+  addColumn('locations', 'holiday_list_id', 'INTEGER');
+  addColumn('holidays', 'list_id', 'INTEGER');     // NULL = the default holiday list
+  addColumn('leave_balances', 'adjustment', 'REAL NOT NULL DEFAULT 0'); // carry-forward, comp-offs, penalties
+  addColumn('expenses', 'distance_km', 'REAL');
+  addColumn('expenses', 'days', 'REAL');
+  addColumn('expenses', 'receipt_required', 'INTEGER DEFAULT 0');
+  addColumn('attendance', 'penalty_applied', 'INTEGER DEFAULT 0');
+  // Professional services: projects belong to clients and carry billing details.
+  addColumn('projects', 'client_id', 'INTEGER REFERENCES clients(id) ON DELETE SET NULL');
+  addColumn('projects', 'code', 'TEXT');
+  addColumn('projects', 'billing_type', "TEXT DEFAULT 'time_materials'");
+  addColumn('projects', 'manager_id', 'INTEGER');
+  addColumn('projects', 'budget_amount', 'REAL');
+  addColumn('projects', 'description', 'TEXT');
+  addColumn('projects', 'health', "TEXT DEFAULT 'on_track'");
+  addColumn('projects', 'opportunity_id', 'INTEGER');
+  addColumn('timesheets', 'invoice_id', 'INTEGER');
   addColumn('locations', 'latitude', 'REAL');
   addColumn('locations', 'longitude', 'REAL');
   addColumn('locations', 'radius_m', 'INTEGER DEFAULT 300');

@@ -25,7 +25,7 @@ const RELATED = {
   regularizations: ['attendance', 'approvals', 'dashboard'],
   attendance: ['dashboard', 'reports'],
   expenses: ['approvals', 'dashboard'],
-  timesheets: ['approvals', 'projects'],
+  timesheets: ['approvals', 'projects', 'finance'],
   'tax-declarations': ['approvals'],
   employees: ['dashboard', 'departments', 'designations', 'locations', 'onboarding', 'reports', 'search', 'payroll'],
   candidates: ['jobs', 'employees', 'onboarding', 'dashboard', 'reports'],
@@ -53,6 +53,11 @@ const RELATED = {
   people: ['dashboard'],
   activity: ['productivity'],
   settings: ['approvals'],
+  clients: ['projects', 'opportunities', 'finance'],
+  projects: ['clients', 'resources', 'finance', 'timesheets'],
+  opportunities: ['clients', 'projects'],
+  resources: ['projects'],
+  finance: ['projects', 'clients'],
 };
 
 export const api = createApi({

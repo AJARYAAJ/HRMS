@@ -92,7 +92,10 @@ const STATUS_COLOR = {
   rejected: 'red', absent: 'red', exited: 'red', cancelled: 'slate', behind: 'red', in_repair: 'amber', retired: 'slate', high: 'red', urgent: 'red',
   manager_approved: 'violet', withdrawn: 'slate', reimbursed: 'green', draft: 'slate', probation: 'amber', extended: 'amber', confirmed: 'green',
   todo: 'slate', review: 'violet', done: 'green', inside: 'green', outside: 'amber', idle: 'amber', offline: 'slate', paused: 'violet', productive: 'green', unproductive: 'red', neutral: 'blue',
-  sent: 'green', logged: 'blue', queued: 'slate', retrying: 'amber', failed: 'red',
+  sent: 'blue', partially_paid: 'amber', void: 'slate', overdue: 'red', off_track: 'red',
+  lead: 'slate', qualified: 'blue', proposal: 'violet', negotiation: 'amber', won: 'green', lost: 'red',
+  bench: 'red', partial: 'amber', full: 'green', overallocated: 'violet', time_materials: 'blue', fixed: 'violet', non_billable: 'slate',
+  logged: 'blue', queued: 'slate', retrying: 'amber', failed: 'red',
   medium: 'amber', low: 'slate', leave: 'violet', holiday: 'blue', remote: 'blue', applied: 'slate', admin: 'violet', hr: 'blue', manager: 'amber', employee: 'slate',
 };
 export function Badge({ children, color, status, className = '', ...rest }) {
@@ -136,6 +139,7 @@ export function StatCard({ icon: Icon, label, value, hint, tone = 'brand', onCli
     brand: 'from-brand-500 to-violet-500 shadow-brand-500/30', green: 'from-emerald-500 to-teal-500 shadow-emerald-500/30',
     amber: 'from-amber-500 to-orange-500 shadow-amber-500/30', rose: 'from-rose-500 to-pink-500 shadow-rose-500/30',
     sky: 'from-sky-500 to-cyan-500 shadow-sky-500/30', slate: 'from-slate-500 to-slate-700 shadow-slate-500/30',
+    violet: 'from-violet-500 to-fuchsia-500 shadow-violet-500/30',
   };
   return (
     <div onClick={onClick} className={cx('card card-pad group transition hover:-translate-y-0.5 hover:shadow-md', onClick && 'cursor-pointer')}>

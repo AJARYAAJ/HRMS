@@ -245,13 +245,6 @@ export const expensesRouter = crud({
   },
 });
 
-export const projectsRouter = crud({
-  table: 'projects', label: 'project', fields: ['name', 'client', 'status', 'start_date', 'end_date', 'budget_hours'],
-  readAll: true, write: ['admin', 'hr', 'manager'], filters: ['status'], order: 't.name',
-  select: `SELECT t.*, COALESCE((SELECT SUM(hours) FROM timesheets s WHERE s.project_id = t.id), 0) AS logged_hours,
-           (SELECT COUNT(DISTINCT employee_id) FROM timesheets s WHERE s.project_id = t.id) AS members FROM projects t`,
-});
-
 export const timesheetsRouter = crud({
   table: 'timesheets', label: 'timesheet entry', link: '/timesheets',
   fields: ['employee_id', 'project_id', 'date', 'hours', 'task', 'billable'],

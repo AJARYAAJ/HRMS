@@ -16,6 +16,7 @@ import { workforceRouter, attendanceRequestsRouter } from './routes/workforce.js
 import { peopleRouter } from './routes/people.js';
 import { careersRouter, offersRouter } from './routes/careers.js';
 import { agentDownloadsRouter } from './routes/agentDownloads.js';
+import { clientsRouter, projectsRouter, opportunitiesRouter, resourcesRouter, financeRouter } from './routes/psa.js';
 import { workRouter, travelRouter } from './routes/work.js';
 import { agentRouter, activityRouter } from './routes/activity.js';
 import { hrdocsRouter, lettersRouter, letterRequestsRouter, customFieldsRouter, kbRouter } from './routes/hrdocs.js';
@@ -59,7 +60,11 @@ export function createApp() {
   api.use('/goals', m.goalsRouter);
   api.use('/reviews', m.reviewsRouter);
   api.use('/kudos', m.kudosRouter);
-  api.use('/projects', m.projectsRouter);
+  api.use('/projects', projectsRouter);
+  api.use('/clients', clientsRouter);
+  api.use('/opportunities', opportunitiesRouter);
+  api.use('/resources', resourcesRouter);
+  api.use('/finance', financeRouter);
   api.use('/timesheets', m.timesheetsRouter);
   api.use('/assets', m.assetsRouter);
   api.use('/tickets', m.ticketsRouter);

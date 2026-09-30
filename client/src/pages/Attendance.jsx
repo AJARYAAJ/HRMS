@@ -12,12 +12,13 @@ const DAY_STYLE = {
   present: 'bg-emerald-500', half_day: 'bg-amber-400', leave: 'bg-violet-500', absent: 'bg-rose-500', holiday: 'bg-sky-400', weekend: 'bg-slate-200 dark:bg-slate-700',
 };
 
-function Calendar({ month, records, holidays }) {
+function Calendar({ month, records, holidays, weeklyOffs }) {
   const [y, m] = month.split('-').map(Number);
   const first = new Date(y, m - 1, 1).getDay();
   const days = new Date(y, m, 0).getDate();
   const byDate = Object.fromEntries(records.map((r) => [r.date, r]));
   const hol = Object.fromEntries(holidays.map((h) => [h.date, h]));
+  const offs = weeklyOffs ? new Set(weeklyOffs) : null; // from the employee's weekly-off policy
   const today = todayStr();
   const cells = [...Array(first).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
   return (
@@ -31,7 +32,7 @@ function Calendar({ month, records, holidays }) {
           const ds = `${month}-${String(d).padStart(2, '0')}`;
           const dow = new Date(y, m - 1, d).getDay();
           const rec = byDate[ds];
-          const status = hol[ds] ? 'holiday' : rec?.status || (dow === 0 || dow === 6 ? 'weekend' : ds < today ? 'absent' : null);
+          const status = hol[ds] ? 'holiday' : rec?.status || ((offs ? offs.has(ds) : dow === 0 || dow === 6) ? 'weekend' : ds < today ? 'absent' : null);
           const hrs = rec?.clock_out ? hoursBetween(rec.clock_in, rec.clock_out) : null;
           return (
             <div key={ds} title={hol[ds]?.name || titleCase(status || '')} className={cx('group relative flex aspect-square flex-col rounded-xl border p-1.5 text-left transition sm:p-2',
@@ -81,7 +82,7 @@ function MyAttendance() {
               <button className="btn-secondary btn-sm" onClick={() => reg.onOpen()} data-testid="regularize-btn"><Plus size={14} /> Regularize</button>
             </div>
           </div>
-          {isLoading ? <CardSkeleton lines={8} className="!border-0 !p-0 !shadow-none" /> : <Calendar month={month} records={data.records} holidays={data.holidays} />}
+          {isLoading ? <CardSkeleton lines={8} className="!border-0 !p-0 !shadow-none" /> : <Calendar month={month} records={data.records} holidays={data.holidays} weeklyOffs={data.weekly_offs} />}
         </div>
         <div className="space-y-6">
           <ClockWidget compact />

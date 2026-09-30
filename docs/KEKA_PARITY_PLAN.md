@@ -26,23 +26,26 @@ Status: ✅ done · 🚧 in progress · ⏳ planned
   - payments, overdue invoices and receivables ageing;
   - project P&L.
 
-## Phase A: Plans and policies engine (the core of the request) 🚧
+## Phase A: Plans and policies engine (the core of the request) ✅ A1–A5
 
-Every plan type below:
+Shipped in **Administration → Policies**. Every plan type below:
 
-- has any number of named plans, one marked **default**;
-- is assigned per employee, or in bulk by department, location or company;
-- appears on the employee's profile ("Assigned plans");
-- is actually used by the engine: leave balances, attendance status, payroll working days, expense validation and
-  agent settings all read the employee's own plan.
+- has any number of named plans, one marked **default** (employees without an assignment follow it);
+- is assigned per employee or in bulk (search by name, department or location, select, assign); holiday lists can
+  also be linked to office locations;
+- is shown to employees where it matters (their leave plan on Leave, expense policy on the claim form, allowed
+  clock-in modes on the clock widget, their holiday list under Leave → Holidays);
+- is actually used by the engine: leave balances, attendance status, payroll loss-of-pay, and expense validation all
+  read the employee's own plan. Late-mark penalties are calculated per month from Policies → Late-mark penalties and
+  can be waived.
 
 | # | Plan type | What it controls | Used by |
 | --- | --- | --- | --- |
-| A1 | **Leave plan** | Leave types in the plan, each with: yearly quota; accrual (yearly upfront or monthly, pro-rated from joining); carry-forward cap; encashable; half-day allowed; minimum notice days; maximum consecutive days; allowed during probation; sandwich rule (weekends/holidays inside a leave count); gender restriction | Leave balances, apply-leave validation, year-end |
-| A2 | **Holiday list** | Its own holidays (e.g. Pune vs Bengaluru), optional holidays and quota | Leave day counting, attendance, calendar, payroll |
-| A3 | **Weekly-off policy** | Which days are off, including patterns such as "2nd and 4th Saturday" or "all Saturdays" | Leave counting (and the sandwich rule), absence marking, payroll working days |
-| A4 | **Attendance tracking policy** | Allowed capture methods (web, remote, geo-fence enforced); full-day and half-day minimum hours; grace minutes; **late-arrival penalty** (e.g. every 3 late marks in a month deduct ½ day from a leave type, else LOP); regularisation requests allowed per month; overtime eligibility and minimum overtime | Clock-in rules, daily status, penalties report, regularisation validation |
-| A5 | **Expense policy** | Expense categories, each with: per-claim limit; monthly limit; receipt required above an amount; **mileage** (rate per km); per-diem rate; allowed payment modes | Claim validation, reimbursement through payroll, approvals |
+| A1 ✅ | **Leave plan** | Leave types in the plan, each with: yearly quota; accrual (yearly upfront or monthly, pro-rated from joining); carry-forward cap; encashable; half-day allowed; minimum notice days; maximum consecutive days; allowed during probation; sandwich rule (weekends/holidays inside a leave count); gender restriction | Leave balances, apply-leave validation, year-end |
+| A2 ✅ | **Holiday list** | Its own holidays (e.g. Pune vs Bengaluru), optional holidays and quota | Leave day counting, attendance, calendar, payroll |
+| A3 ✅ | **Weekly-off policy** | Which days are off, including patterns such as "2nd and 4th Saturday" or "all Saturdays" | Leave counting (and the sandwich rule), absence marking, payroll working days |
+| A4 ✅ | **Attendance tracking policy** | Allowed capture methods (web, remote, geo-fence enforced); full-day and half-day minimum hours; grace minutes; **late-arrival penalty** (e.g. every 3 late marks in a month deduct ½ day from a leave type, else LOP); regularisation requests allowed per month; overtime eligibility and minimum overtime | Clock-in rules, daily status, penalties report, regularisation validation |
+| A5 ✅ | **Expense policy** | Expense categories, each with: per-claim limit; monthly limit; receipt required above an amount; **mileage** (rate per km); per-diem rate; allowed payment modes | Claim validation, reimbursement through payroll, approvals |
 | A6 | **Activity tracking policy** (We360) | Tracking on/off; tracking window (working days and hours only); screenshots on/off and interval; screenshot blur; idle threshold; away limit; pausing allowed | Desktop agent settings, resolved per employee |
 
 ## Phase B: Onboarding before and after joining ⏳

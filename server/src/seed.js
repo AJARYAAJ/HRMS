@@ -120,9 +120,72 @@ export function seed({ reset = true } = {}) {
     const late = insert('shifts', { name: 'US Overlap', start_time: '13:00', end_time: '22:00', grace_minutes: 15 });
 
     [['Casual Leave', 'CL', 12, 1, 0, '#6366f1'], ['Sick Leave', 'SL', 10, 1, 0, '#f43f5e'], ['Earned Leave', 'EL', 18, 1, 1, '#10b981'],
-      ['Work From Home', 'WFH', 24, 1, 0, '#0ea5e9'], ['Comp Off', 'CO', 5, 1, 0, '#f59e0b'], ['Loss of Pay', 'LOP', 0, 0, 0, '#64748b']]
+      ['Work From Home', 'WFH', 24, 1, 0, '#0ea5e9'], ['Comp Off', 'CO', 5, 1, 0, '#f59e0b'], ['Loss of Pay', 'LOP', 0, 0, 0, '#64748b'],
+      ['Maternity Leave', 'ML', 0, 1, 0, '#ec4899'], ['Paternity Leave', 'PL', 0, 1, 0, '#8b5cf6']]
       .forEach(([name, code, annual_quota, paid, carry_forward, color]) => insert('leave_types', { name, code, annual_quota, paid, carry_forward, color }));
-    for (const [name, date, type] of HOLIDAYS) insert('holidays', { name, date, type });
+
+    // ---------- policies: plans that are assigned to employees (Keka-style) ----------
+    const lt = Object.fromEntries(all('SELECT id, code FROM leave_types').map((t) => [t.code, t.id]));
+    const rule = (plan_id, code, annual_quota, o = {}) => insert('leave_plan_rules', {
+      plan_id, leave_type_id: lt[code], annual_quota, accrual: 'yearly', carry_forward_cap: 0, encashable: 0, allow_half_day: 1,
+      min_notice_days: 0, probation_allowed: 1, sandwich: 0, ...o,
+    });
+    const stdPlan = insert('leave_plans', { name: 'Standard leave plan', description: 'Full-time employees', is_default: 1 });
+    rule(stdPlan, 'CL', 12, { max_consecutive: 3 });
+    rule(stdPlan, 'SL', 10);
+    rule(stdPlan, 'EL', 18, { carry_forward_cap: 30, encashable: 1, min_notice_days: 7, probation_allowed: 0, sandwich: 1, allow_half_day: 0 });
+    rule(stdPlan, 'WFH', 24);
+    rule(stdPlan, 'CO', 0, { accrual: 'none' });
+    rule(stdPlan, 'LOP', 0, { accrual: 'none' });
+    rule(stdPlan, 'ML', 182, { gender: 'Female', allow_half_day: 0, probation_allowed: 0, min_notice_days: 30 });
+    rule(stdPlan, 'PL', 5, { gender: 'Male', allow_half_day: 0 });
+    const internPlan = insert('leave_plans', { name: 'Interns & contract staff', description: 'Monthly accrual, no earned leave' });
+    rule(internPlan, 'CL', 12, { accrual: 'monthly' });
+    rule(internPlan, 'SL', 6);
+    rule(internPlan, 'WFH', 12);
+    rule(internPlan, 'CO', 0, { accrual: 'none' });
+    rule(internPlan, 'LOP', 0, { accrual: 'none' });
+
+    const karnataka = insert('holiday_lists', { name: 'India – Karnataka', description: 'Bengaluru HQ and remote employees', optional_limit: 2, is_default: 1 });
+    const maharashtra = insert('holiday_lists', { name: 'India – Maharashtra', description: 'Mumbai and Pune offices', optional_limit: 2 });
+    for (const [name, date, type] of HOLIDAYS) insert('holidays', { name, date, type, list_id: karnataka });
+    for (const [name, date, type] of [...HOLIDAYS.filter(([n]) => n !== 'May Day'), ['Gudi Padwa', '2026-03-19', 'Public'], ['Maharashtra Day', '2026-05-01', 'Public']]) {
+      insert('holidays', { name, date, type, list_id: maharashtra });
+    }
+    run('UPDATE locations SET holiday_list_id = ? WHERE id IN (?, ?)', maharashtra, loc[1], loc[2]);
+
+    insert('weekly_off_policies', { name: 'Saturday & Sunday off', description: 'Five-day week', pattern: JSON.stringify({ 0: 'all', 6: 'all' }), is_default: 1 });
+    insert('weekly_off_policies', { name: 'Sunday + 2nd & 4th Saturday off', description: 'Alternate Saturdays working (support and operations)', pattern: JSON.stringify({ 0: 'all', 6: '2,4' }) });
+
+    insert('attendance_policies', {
+      name: 'Office – standard', description: 'Web, remote and field clock-in; 3 late marks = ½ day casual leave', allow_web: 1, allow_remote: 1, allow_field: 1,
+      late_penalty_every: 3, late_penalty_days: 0.5, penalty_leave_type_id: lt.CL, max_regularizations: 4, overtime_allowed: 1, overtime_min_minutes: 30, is_default: 1,
+    });
+    const fieldAtt = insert('attendance_policies', {
+      name: 'Field sales', description: 'Remote or field clock-in only, no geofence, 30 min grace', allow_web: 0, allow_remote: 1, allow_field: 1,
+      geofence_mode: 'off', grace_minutes: 30, late_penalty_every: 0, late_penalty_days: 0.5, overtime_allowed: 0, overtime_min_minutes: 30,
+    });
+
+    const cat = (policy_id, name, kind, o = {}) => insert('expense_categories', { policy_id, name, kind, ...o });
+    const stdExp = insert('expense_policies', { name: 'Standard expense policy', description: 'Limits for all employees', is_default: 1 });
+    cat(stdExp, 'Travel', 'amount', { per_claim_limit: 10000, receipt_above: 500 });
+    cat(stdExp, 'Local conveyance', 'mileage', { rate: 12, monthly_limit: 6000 });
+    cat(stdExp, 'Outstation per diem', 'per_diem', { rate: 1500 });
+    cat(stdExp, 'Food & Meals', 'amount', { per_claim_limit: 5000, receipt_above: 300 });
+    cat(stdExp, 'Internet', 'amount', { monthly_limit: 1500 });
+    cat(stdExp, 'Client Entertainment', 'amount', { per_claim_limit: 5000, receipt_above: 0 });
+    cat(stdExp, 'Office Supplies', 'amount', { per_claim_limit: 5000, receipt_above: 1000 });
+    cat(stdExp, 'Training', 'amount', { per_claim_limit: 25000, receipt_above: 0 });
+    cat(stdExp, 'Relocation', 'amount', { per_claim_limit: 50000, receipt_above: 0 });
+    cat(stdExp, 'Other', 'amount', { per_claim_limit: 5000, receipt_above: 1000 });
+    const salesExp = insert('expense_policies', { name: 'Sales & field', description: 'Higher travel and client limits for the sales team' });
+    cat(salesExp, 'Travel', 'amount', { per_claim_limit: 25000, receipt_above: 1000 });
+    cat(salesExp, 'Local conveyance', 'mileage', { rate: 14, monthly_limit: 12000 });
+    cat(salesExp, 'Outstation per diem', 'per_diem', { rate: 2000 });
+    cat(salesExp, 'Food & Meals', 'amount', { per_claim_limit: 5000, receipt_above: 500 });
+    cat(salesExp, 'Internet', 'amount', { monthly_limit: 2000 });
+    cat(salesExp, 'Client Entertainment', 'amount', { per_claim_limit: 15000, receipt_above: 0 });
+    cat(salesExp, 'Other', 'amount', { per_claim_limit: 5000, receipt_above: 1000 });
 
     const colors = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6'];
     let code = 1001;
@@ -199,6 +262,8 @@ export function seed({ reset = true } = {}) {
         exit_date: ymd(addDays(today, -between(30, 200))), annual_ctc: 700000 });
     }
 
+    run('UPDATE employees SET attendance_policy_id = ?, expense_policy_id = ? WHERE department_id = ?', fieldAtt, salesExp, dept.Sales);
+    run("UPDATE employees SET leave_plan_id = ? WHERE employment_type IN ('Contract', 'Intern')", internPlan);
     const emps = all("SELECT e.*, d.name AS dept FROM employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.status != 'exited'");
     for (const e of emps) {
       ensureLeaveBalances(e.id, year);

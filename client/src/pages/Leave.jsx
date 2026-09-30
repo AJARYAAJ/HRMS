@@ -10,28 +10,35 @@ import { thisMonth, todayStr, date, shortDate } from '../lib/format';
 function Balances() {
   const { data = [], isLoading } = useGet('leave/balances');
   if (isLoading) return <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="card card-pad space-y-3"><Skeleton className="h-4 w-1/2" /><Skeleton className="h-8 w-1/3" /><Skeleton className="h-2 w-full" /></div>)}</div>;
+  const shown = data.filter((b) => b.applicable !== false);
+  const plan = data.find((b) => b.plan)?.plan;
   return (
+    <div className="space-y-2">
+    {plan && <p className="text-xs muted" data-testid="leave-plan">Leave plan: <b>{plan}</b></p>}
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6" data-testid="leave-balances">
-      {data.map((b) => {
+      {shown.map((b) => {
         const lop = b.code === 'LOP';
-        const pct = lop || !b.allocated ? 0 : (b.available / b.allocated) * 100;
+        const total = b.allocated + (b.carried || 0) + (b.adjustment || 0);
+        const pct = lop || total <= 0 ? 0 : Math.max(0, Math.min(100, (b.available / total) * 100));
         return (
           <div key={b.leave_type_id} className="card card-pad relative overflow-hidden">
             <div className="absolute inset-x-0 top-0 h-1" style={{ background: b.color }} />
             <div className="text-sm font-semibold muted">{b.name}</div>
             <div className="mt-2 flex items-baseline gap-1">
               <span className="text-3xl font-bold text-slate-900 dark:text-white" data-testid={`balance-${b.code}`}>{lop ? b.used : b.available}</span>
-              <span className="text-sm muted">{lop ? 'days taken' : `/ ${b.allocated}`}</span>
+              <span className="text-sm muted">{lop ? 'days taken' : `/ ${total}`}</span>
             </div>
             {!lop && (
               <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                 <div className="h-full rounded-full" style={{ width: `${pct}%`, background: b.color }} />
               </div>
             )}
-            <div className="mt-2 text-xs muted">{b.used} used{b.pending ? ` · ${b.pending} pending` : ''}</div>
+            <div className="mt-2 text-xs muted">{b.used} used{b.pending ? ` · ${b.pending} pending` : ''}{b.carried ? ` · ${b.carried} carried` : ''}{b.adjustment ? ` · ${b.adjustment > 0 ? '+' : ''}${b.adjustment} adj.` : ''}</div>
+            {b.rule?.accrual === 'monthly' && <div className="text-[11px] muted">Credited monthly ({b.rule.annual_quota}/yr)</div>}
           </div>
         );
       })}
+    </div>
     </div>
   );
 }
@@ -99,7 +106,10 @@ function Holidays() {
   const upcoming = data.filter((h) => h.date >= todayStr());
   return (
     <div className="space-y-4">
-      {isHR && <div className="flex justify-end"><button className="btn-primary" onClick={() => add.onOpen()}><Plus size={16} /> Add holiday</button></div>}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm muted" data-testid="holiday-list-name">{data[0]?.list_name ? <>Holiday list: <b>{data[0].list_name}</b></> : 'Company holidays'}</p>
+        {isHR && <button className="btn-primary" onClick={() => add.onOpen()}><Plus size={16} /> Add holiday</button>}
+      </div>
       {isLoading ? <CardSkeleton lines={6} /> : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {data.map((h) => (
@@ -196,8 +206,19 @@ export default function Leave() {
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') || 'mine';
   const apply = useDisclosure(params.get('apply') === '1');
-  const { data: types = [] } = useGet('leave/types');
+  const { data: balances = [] } = useGet('leave/balances');
   const [act] = useAction();
+  const [vals, setVals] = useState({});
+  const types = balances.filter((b) => b.applicable !== false);
+  const chosen = types.find((t) => t.leave_type_id === Number(vals.leave_type_id));
+  const rule = chosen?.rule;
+  const ruleHint = chosen && [
+    chosen.available !== null ? `${chosen.available} day(s) available` : null,
+    rule.min_notice_days ? `apply ${rule.min_notice_days}+ days ahead` : null,
+    rule.max_consecutive ? `max ${rule.max_consecutive} days in a row` : null,
+    rule.sandwich ? 'weekends inside the leave count' : null,
+    !rule.probation_allowed ? 'not during probation' : null,
+  ].filter(Boolean).join(' · ');
   useEffect(() => { if (params.get('apply') === '1') apply.onOpen(); }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -217,14 +238,16 @@ export default function Leave() {
       <FormModal open={apply.open} onClose={() => { apply.onClose(); if (params.get('apply')) setParams({}); }} title="Apply for leave" submitLabel="Submit request"
         initial={{ start_date: todayStr(), end_date: todayStr(), half_day: 0 }}
         fields={[
-          { name: 'leave_type_id', label: 'Leave type', type: 'select', required: true, full: true, options: types.map((t) => [t.id, t.name]) },
+          { name: 'leave_type_id', label: 'Leave type', type: 'select', required: true, full: true, hint: ruleHint || undefined,
+            options: types.map((t) => [t.leave_type_id, t.name]) },
           { name: 'start_date', label: 'From', type: 'date', required: true },
           { name: 'end_date', label: 'To', type: 'date', required: true },
-          { name: 'half_day', label: 'Half day (single date only)', type: 'checkbox', full: true },
+          { name: 'half_day', label: 'Half day (single date only)', type: 'checkbox', full: true, hidden: () => rule && !rule.allow_half_day },
           { name: 'reason', label: 'Reason', type: 'textarea', required: true, full: true, placeholder: 'Briefly describe the reason' },
         ]}
+        onValues={setVals}
         onSubmit={(v) => act('leave/requests', { body: { ...v, leave_type_id: Number(v.leave_type_id), end_date: v.half_day ? v.start_date : v.end_date }, success: 'Leave request submitted' })}>
-        <div className="flex items-center gap-2 rounded-xl bg-brand-50 p-3 text-xs text-brand-800 dark:bg-brand-500/10 dark:text-brand-300"><PartyPopper size={14} /> Weekends and company holidays are excluded automatically.</div>
+        <div className="flex items-center gap-2 rounded-xl bg-brand-50 p-3 text-xs text-brand-800 dark:bg-brand-500/10 dark:text-brand-300"><PartyPopper size={14} /> Your weekly offs and holidays are excluded automatically.</div>
       </FormModal>
     </div>
   );

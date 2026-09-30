@@ -2,7 +2,7 @@ import { lazy } from 'react';
 import {
   LayoutDashboard, CheckSquare, Clock, CalendarDays, Timer, Wallet, Receipt, LifeBuoy, FileText, GraduationCap, Laptop,
   Users, Network, UserPlus, Target, PartyPopper, Briefcase, Activity, Banknote, BarChart3, Building2, Settings, ShieldCheck, UserCircle,
-  LogOut, ListTodo, Plane, Calendar, CalendarRange, Building, FolderKanban, Crosshair, UsersRound, Landmark, PieChart, DownloadCloud,
+  LogOut, ListTodo, Plane, Calendar, CalendarRange, Building, FolderKanban, Crosshair, UsersRound, Landmark, PieChart, DownloadCloud, ScrollText,
 } from 'lucide-react';
 
 // Every page is its own chunk; `load` is reused for hover-prefetching from the sidebar.
@@ -50,6 +50,7 @@ export const pages = {
   finance: page(() => import('./pages/Finance')),
   analytics: page(() => import('./pages/Analytics')),
   exports: page(() => import('./pages/Exports')),
+  policies: page(() => import('./pages/Policies')),
 };
 
 const ALL = ['admin', 'hr', 'manager', 'employee'];
@@ -100,6 +101,7 @@ export const navGroups = [
   { label: 'Administration', items: [
     { path: '/payroll', label: 'Payroll', icon: Banknote, page: 'payroll', roles: HR },
     { path: '/organization', label: 'Organization', icon: Building2, page: 'organization', roles: HR },
+    { path: '/policies', label: 'Policies', icon: ScrollText, page: 'policies', roles: HR },
     { path: '/settings', label: 'Settings', icon: Settings, page: 'settings', roles: HR },
     { path: '/exports', label: 'Bulk export', icon: DownloadCloud, page: 'exports', roles: HR },
     { path: '/audit-log', label: 'Audit Log', icon: ShieldCheck, page: 'audit', roles: HR },

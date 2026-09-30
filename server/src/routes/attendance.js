@@ -3,9 +3,10 @@ import { all, get, insert, update, run } from '../db.js';
 import { scopeSql, canManage, isHR } from '../auth.js';
 import { crud } from '../crud.js';
 import {
-  today, nowTime, minutes, httpError, monthRange, workingDaysBetween, holidaySet, audit, notify,
-  ensureLeaveBalances, parseDate, ymd, isWeekend, notifyHR,
+  today, nowTime, minutes, httpError, monthRange, audit, notify,
+  ensureLeaveBalances, parseDate, ymd, notifyHR, workingDaysFor, offDayChecker,
 } from '../utils.js';
+import { attendancePolicyFor, leaveRulesFor, policyFor, holidayListFilter } from '../policies.js';
 
 export const attendanceRouter = Router();
 export const leaveRouter = Router();
@@ -27,8 +28,8 @@ export function distanceMetres(lat1, lon1, lat2, lon2) {
  * Geofence check against the employee's office. Mode (settings.geofence_mode):
  *   off – ignore location, flag – record inside/outside, enforce – block office clock-ins outside the fence.
  */
-function checkGeofence(employeeId, lat, lng, workMode) {
-  const mode = get("SELECT value FROM settings WHERE key = 'geofence_mode'")?.value || 'flag';
+function checkGeofence(employeeId, lat, lng, workMode, policy) {
+  const mode = policy?.geofence_mode || get("SELECT value FROM settings WHERE key = 'geofence_mode'")?.value || 'flag';
   const hasFix = Number.isFinite(lat) && Number.isFinite(lng);
   if (mode === 'off') return { geo_status: null, latitude: hasFix ? lat : null, longitude: hasFix ? lng : null };
   const loc = get('SELECT l.* FROM locations l JOIN employees e ON e.location_id = l.id WHERE e.id = ?', employeeId);
@@ -45,28 +46,44 @@ function checkGeofence(employeeId, lat, lng, workMode) {
   return { geo_status: inside ? 'inside' : 'outside', latitude: lat, longitude: lng, distance };
 }
 
-export function evaluateDay(clockIn, clockOut, shift) {
-  const late = minutes(clockIn) > minutes(shift.start_time) + (shift.grace_minutes ?? 15) ? 1 : 0;
+/**
+ * Day status from punches. The attendance policy can override the shift's grace period and the hours needed
+ * for a full or half day (defaults: 75% / 40% of the shift length).
+ */
+export function evaluateDay(clockIn, clockOut, shift, policy = null) {
+  const grace = policy?.grace_minutes ?? shift.grace_minutes ?? 15;
+  const late = minutes(clockIn) > minutes(shift.start_time) + grace ? 1 : 0;
   if (!clockOut) return { status: 'present', late };
   const worked = minutes(clockOut) - minutes(clockIn);
   const shiftLen = minutes(shift.end_time) - minutes(shift.start_time);
-  const status = worked >= shiftLen * 0.75 ? 'present' : worked >= shiftLen * 0.4 ? 'half_day' : 'absent';
+  const full = policy?.full_day_hours != null ? policy.full_day_hours * 60 : shiftLen * 0.75;
+  const half = policy?.half_day_hours != null ? policy.half_day_hours * 60 : shiftLen * 0.4;
+  const status = worked >= full ? 'present' : worked >= half ? 'half_day' : 'absent';
   return { status, late };
 }
+
+const MODE_ALLOWED = { office: 'allow_web', remote: 'allow_remote', field: 'allow_field' };
+const MODE_LABEL = { office: 'office', remote: 'remote', field: 'field' };
 
 // ---------- attendance ----------
 attendanceRouter.get('/today', (req, res) => {
   const record = get('SELECT * FROM attendance WHERE employee_id = ? AND date = ?', req.user.id, today());
-  res.json({ record: record || null, shift: shiftFor(req.user.id), server_time: nowTime(), date: today() });
+  const policy = attendancePolicyFor(req.user.id);
+  const modes = Object.keys(MODE_ALLOWED).filter((m) => !policy || policy[MODE_ALLOWED[m]] !== 0);
+  res.json({ record: record || null, shift: shiftFor(req.user.id), server_time: nowTime(), date: today(), policy: policy ? { name: policy.name, modes } : null, modes });
 });
 
 attendanceRouter.post('/clock-in', (req, res) => {
   const existing = get('SELECT * FROM attendance WHERE employee_id = ? AND date = ?', req.user.id, today());
   if (existing?.clock_in) throw httpError(400, `Already clocked in at ${existing.clock_in}`);
   const time = nowTime();
-  const { late } = evaluateDay(time, null, shiftFor(req.user.id));
+  const policy = attendancePolicyFor(req.user.id);
+  const { late } = evaluateDay(time, null, shiftFor(req.user.id), policy);
   const work_mode = ['office', 'remote', 'field'].includes(req.body?.work_mode) ? req.body.work_mode : 'office';
-  const { distance, ...geo } = checkGeofence(req.user.id, Number(req.body?.latitude ?? NaN), Number(req.body?.longitude ?? NaN), work_mode);
+  if (policy && policy[MODE_ALLOWED[work_mode]] === 0) {
+    throw httpError(400, `Your attendance policy (${policy.name}) does not allow ${MODE_LABEL[work_mode]} clock-in`);
+  }
+  const { distance, ...geo } = checkGeofence(req.user.id, Number(req.body?.latitude ?? NaN), Number(req.body?.longitude ?? NaN), work_mode, policy);
   if (existing) update('attendance', existing.id, { clock_in: time, status: 'present', late, work_mode, ...geo });
   else insert('attendance', { employee_id: req.user.id, date: today(), clock_in: time, status: 'present', late, work_mode, ...geo });
   audit(req.user.id, 'clock_in', 'attendance', null, { time, work_mode, ...geo, distance });
@@ -80,9 +97,11 @@ attendanceRouter.post('/clock-out', (req, res) => {
   let time = nowTime();
   if (minutes(time) < minutes(rec.clock_in)) time = rec.clock_in;
   const shift = shiftFor(req.user.id);
-  const { status, late } = evaluateDay(rec.clock_in, time, shift);
-  // Time beyond the scheduled shift length counts as overtime.
-  const overtime = Math.max(0, (minutes(time) - minutes(rec.clock_in)) - (minutes(shift.end_time) - minutes(shift.start_time)));
+  const policy = attendancePolicyFor(req.user.id);
+  const { status, late } = evaluateDay(rec.clock_in, time, shift, policy);
+  // Time beyond the scheduled shift length counts as overtime (if the policy allows it and it passes the minimum).
+  let overtime = Math.max(0, (minutes(time) - minutes(rec.clock_in)) - (minutes(shift.end_time) - minutes(shift.start_time)));
+  if (policy && (!policy.overtime_allowed || overtime < (policy.overtime_min_minutes ?? 0))) overtime = 0;
   update('attendance', rec.id, { clock_out: time, status, late, overtime_mins: overtime });
   audit(req.user.id, 'clock_out', 'attendance', rec.id, { time });
   res.json(get('SELECT * FROM attendance WHERE id = ?', rec.id));
@@ -94,19 +113,23 @@ attendanceRouter.get('/', (req, res) => {
   const month = req.query.month || today().slice(0, 7);
   const { start, end } = monthRange(month);
   const records = all('SELECT * FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ? ORDER BY date', employeeId, start, end);
+  const list = holidayListFilter(policyFor('holiday', employeeId)?.id);
   const holidays = all(
     `SELECT h.*, EXISTS(SELECT 1 FROM optional_holiday_choices c WHERE c.holiday_id = h.id AND c.employee_id = ?) AS opted
-     FROM holidays h WHERE h.date BETWEEN ? AND ?`, employeeId, start, end,
+     FROM holidays h WHERE h.date BETWEEN ? AND ? AND ${list.sql}`, employeeId, start, end, ...list.params,
   ).filter((h) => h.type !== 'Optional' || h.opted);
   const upto = end < today() ? end : today();
-  const workingDays = upto >= start ? workingDaysBetween(start, upto, holidaySet(employeeId)) : 0;
+  const workingDays = upto >= start ? workingDaysFor(employeeId, start, upto) : 0;
+  const off = offDayChecker(employeeId);
+  const weeklyOffs = [];
+  for (let d = parseDate(start); d <= parseDate(end); d.setDate(d.getDate() + 1)) if (off.weeklyOff(d)) weeklyOffs.push(ymd(d));
   const count = (s) => records.filter((r) => r.status === s).length;
   const overtimeMins = records.reduce((a, r) => a + (r.overtime_mins || 0), 0);
   const workedMins = records.reduce((a, r) => a + (r.clock_out ? minutes(r.clock_out) - minutes(r.clock_in) : 0), 0);
   const daysWithHours = records.filter((r) => r.clock_out).length;
   const present = count('present') + count('half_day') * 0.5;
   res.json({
-    records, holidays,
+    records, holidays, weekly_offs: weeklyOffs,
     summary: {
       working_days: workingDays,
       present: count('present'), half_day: count('half_day'), leave: count('leave'),
@@ -164,6 +187,14 @@ export const regularizationsRouter = crud({
     if (!merged.date || !merged.clock_in || !merged.clock_out) throw httpError(400, 'Date, clock-in and clock-out are required');
     if (merged.date > today()) throw httpError(400, 'Cannot regularize a future date');
     if (minutes(merged.clock_out) <= minutes(merged.clock_in)) throw httpError(400, 'Clock-out must be after clock-in');
+    if (!existing) {
+      const ownerId = merged.employee_id ?? user.id;
+      const policy = attendancePolicyFor(ownerId);
+      if (policy?.max_regularizations != null) {
+        const used = get(`SELECT COUNT(*) AS n FROM regularizations WHERE employee_id = ? AND substr(date, 1, 7) = ? AND status != 'rejected'`, ownerId, merged.date.slice(0, 7)).n;
+        if (used >= policy.max_regularizations) throw httpError(400, `Your attendance policy allows ${policy.max_regularizations} regularization(s) a month; you have used them all for ${merged.date.slice(0, 7)}`);
+      }
+    }
     return data;
   },
   afterCreate(id, data) {
@@ -172,7 +203,7 @@ export const regularizationsRouter = crud({
   },
   onDecision(row, status) {
     if (status !== 'approved') return;
-    const { status: dayStatus, late } = evaluateDay(row.clock_in, row.clock_out, shiftFor(row.employee_id, row.date));
+    const { status: dayStatus, late } = evaluateDay(row.clock_in, row.clock_out, shiftFor(row.employee_id, row.date), attendancePolicyFor(row.employee_id));
     const rec = get('SELECT id FROM attendance WHERE employee_id = ? AND date = ?', row.employee_id, row.date);
     const data = { clock_in: row.clock_in, clock_out: row.clock_out, status: dayStatus, late, notes: 'Regularized' };
     if (rec) update('attendance', rec.id, data);
@@ -188,25 +219,63 @@ export const shiftsRouter = crud({
 export const leaveTypesRouter = crud({
   table: 'leave_types', label: 'leave type',
   fields: ['name', 'code', 'annual_quota', 'paid', 'carry_forward', 'color'], readAll: true, order: 't.id',
-  afterCreate() {
-    for (const { id } of all("SELECT id FROM employees WHERE status != 'exited'")) ensureLeaveBalances(id);
+  afterCreate(id, data) {
+    // A new leave type joins the default leave plan with its annual quota; HR can fine-tune it in Policies.
+    const plan = policyFor('leave');
+    if (plan) {
+      insert('leave_plan_rules', {
+        plan_id: plan.id, leave_type_id: id, annual_quota: Number(data.annual_quota) || 0, accrual: Number(data.annual_quota) > 0 ? 'yearly' : 'none',
+        carry_forward_cap: data.carry_forward ? 30 : 0, encashable: data.carry_forward ? 1 : 0, allow_half_day: 1, min_notice_days: 0, probation_allowed: 1, sandwich: 0,
+      });
+    }
+    for (const { id: empId } of all("SELECT id FROM employees WHERE status != 'exited'")) ensureLeaveBalances(empId);
   },
 });
 
-export const holidaysRouter = crud({
-  table: 'holidays', label: 'holiday', fields: ['name', 'date', 'type'], readAll: true, order: 't.date', dateField: 'date',
+const holidaysCrud = crud({
+  table: 'holidays', label: 'holiday', fields: ['name', 'date', 'type', 'list_id'], readAll: true, order: 't.date', dateField: 'date', filters: ['list_id'],
+  select: 'SELECT t.*, l.name AS list_name FROM holidays t LEFT JOIN holiday_lists l ON l.id = t.list_id',
 });
+
+/** Holidays default to the signed-in employee's own holiday list; HR can ask for a specific list (?list_id=) or all (?all=1). */
+export const holidaysRouter = Router();
+holidaysRouter.get('/', (req, res, next) => {
+  if (req.query.all && isHR(req.user)) return next();
+  const listId = req.query.list_id && isHR(req.user) ? Number(req.query.list_id) : policyFor('holiday', req.user.id)?.id;
+  const f = holidayListFilter(listId, 't');
+  res.json(all(`SELECT t.*, l.name AS list_name FROM holidays t LEFT JOIN holiday_lists l ON l.id = t.list_id WHERE ${f.sql} ORDER BY t.date`, ...f.params));
+});
+holidaysRouter.use(holidaysCrud);
 
 function balancesFor(employeeId, year) {
   ensureLeaveBalances(employeeId, year);
-  return all(
-    `SELECT lt.id AS leave_type_id, lt.name, lt.code, lt.color, lt.paid, b.allocated, b.used,
+  const lr = leaveRulesFor(employeeId);
+  const rows = all(
+    `SELECT lt.id AS leave_type_id, lt.name, lt.code, lt.color, lt.paid, b.allocated, b.used, b.carried, b.adjustment,
             COALESCE((SELECT SUM(days) FROM leave_requests r WHERE r.employee_id = b.employee_id
               AND r.leave_type_id = lt.id AND r.status IN ('pending','manager_approved') AND substr(r.start_date,1,4) = ?), 0) AS pending
      FROM leave_balances b JOIN leave_types lt ON lt.id = b.leave_type_id
      WHERE b.employee_id = ? AND b.year = ? ORDER BY lt.id`,
     String(year), employeeId, year,
-  ).map((b) => ({ ...b, available: b.code === 'LOP' ? null : b.allocated - b.used - b.pending }));
+  );
+  return rows
+    // Under a leave plan only its leave types are offered; other types stay visible only while they hold history.
+    .filter((b) => !lr || lr.rules.has(b.leave_type_id) || b.used > 0)
+    .map((b) => {
+      const rule = lr?.rules.get(b.leave_type_id);
+      const unlimited = b.code === 'LOP';
+      return {
+        ...b,
+        available: unlimited ? null : Math.round((b.allocated + b.carried + b.adjustment - b.used - b.pending) * 100) / 100,
+        plan: lr?.plan.name || null,
+        rule: rule ? {
+          accrual: rule.accrual, annual_quota: rule.annual_quota, allow_half_day: !!rule.allow_half_day, min_notice_days: rule.min_notice_days,
+          max_consecutive: rule.max_consecutive, probation_allowed: !!rule.probation_allowed, sandwich: !!rule.sandwich,
+          carry_forward_cap: rule.carry_forward_cap, encashable: !!rule.encashable,
+        } : null,
+        applicable: !lr || !!rule,
+      };
+    });
 }
 
 leaveRouter.get('/balances', (req, res) => {
@@ -225,18 +294,49 @@ leaveRouter.get('/calendar', (req, res) => {
      WHERE r.status IN ('approved','pending','manager_approved') AND r.start_date <= ? AND r.end_date >= ? ORDER BY r.start_date`,
     end, start,
   );
-  res.json({ leaves, holidays: all('SELECT * FROM holidays WHERE date BETWEEN ? AND ? ORDER BY date', start, end) });
+  const list = holidayListFilter(policyFor('holiday', req.user.id)?.id);
+  res.json({ leaves, holidays: all(`SELECT * FROM holidays h WHERE date BETWEEN ? AND ? AND ${list.sql} ORDER BY date`, start, end, ...list.params) });
 });
 
 function markLeaveAttendance(row) {
-  const holidays = holidaySet(row.employee_id);
+  const isOff = offDayChecker(row.employee_id);
   for (let d = parseDate(row.start_date); d <= parseDate(row.end_date); d.setDate(d.getDate() + 1)) {
     const date = ymd(d);
-    if (isWeekend(d) || holidays.has(date)) continue;
+    if (isOff(d)) continue;
     const rec = get('SELECT id, clock_in FROM attendance WHERE employee_id = ? AND date = ?', row.employee_id, date);
     if (rec?.clock_in && row.half_day) continue;
     if (rec) update('attendance', rec.id, { status: 'leave' });
     else insert('attendance', { employee_id: row.employee_id, date, status: 'leave', work_mode: null });
+  }
+}
+
+/**
+ * Leave days between two dates. Weekly offs and holidays are skipped, unless the plan applies the sandwich
+ * rule: then offs that fall between two leave days are counted too.
+ */
+function leaveDays(employeeId, start, end, sandwich) {
+  const isOff = offDayChecker(employeeId);
+  const working = [];
+  for (let d = parseDate(start); d <= parseDate(end); d.setDate(d.getDate() + 1)) if (!isOff(d)) working.push(ymd(d));
+  if (!working.length) return 0;
+  if (!sandwich) return working.length;
+  return Math.round((parseDate(working[working.length - 1]) - parseDate(working[0])) / 86400000) + 1;
+}
+
+function checkLeaveRule(rule, m, days, half, user, existing) {
+  const hrFiling = isHR(user) && user.id !== m.employee_id;
+  if (half && !rule.allow_half_day) throw httpError(400, `${rule.leave_type} cannot be taken as a half day`);
+  if (rule.max_consecutive && days > rule.max_consecutive) throw httpError(400, `${rule.leave_type} allows at most ${rule.max_consecutive} consecutive day(s)`);
+  if (!existing && !hrFiling && rule.min_notice_days > 0) {
+    const notice = Math.round((parseDate(m.start_date) - parseDate(today())) / 86400000);
+    if (notice < rule.min_notice_days) throw httpError(400, `${rule.leave_type} must be applied at least ${rule.min_notice_days} day(s) in advance`);
+  }
+  if (!rule.probation_allowed) {
+    const emp = get('SELECT confirmation_status, probation_end_date FROM employees WHERE id = ?', m.employee_id);
+    // Not available while the employee is still on probation (confirmation pending and probation not yet over).
+    if (emp && emp.confirmation_status !== 'confirmed' && (!emp.probation_end_date || emp.probation_end_date >= today())) {
+      throw httpError(400, `${rule.leave_type} is not available during probation`);
+    }
   }
 }
 
@@ -262,8 +362,13 @@ const requestsCrud = crud({
     if (m.end_date < m.start_date) throw httpError(400, 'End date cannot be before start date');
     const half = m.half_day ? 1 : 0;
     if (half && m.start_date !== m.end_date) throw httpError(400, 'Half-day leave must be a single day');
-    const days = half ? 0.5 : workingDaysBetween(m.start_date, m.end_date, holidaySet(m.employee_id ?? user.id));
-    if (days <= 0) throw httpError(400, 'Selected dates fall on weekends or holidays');
+    const ownerId = m.employee_id ?? user.id;
+    const lr = leaveRulesFor(ownerId);
+    const rule = lr?.rules.get(Number(m.leave_type_id));
+    if (lr && !rule) throw httpError(400, `This leave type is not part of your leave plan (${lr.plan.name})`);
+    const days = half ? 0.5 : leaveDays(ownerId, m.start_date, m.end_date, !!rule?.sandwich);
+    if (days <= 0) throw httpError(400, 'Selected dates fall on weekly offs or holidays');
+    if (rule) checkLeaveRule(rule, { ...m, employee_id: ownerId }, days, half, user, existing);
     const overlap = get(
       `SELECT id FROM leave_requests WHERE employee_id = ? AND status IN ('pending','manager_approved','approved')
        AND start_date <= ? AND end_date >= ? AND id != ?`,

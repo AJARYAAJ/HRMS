@@ -36,6 +36,10 @@ export default function ClockWidget({ compact = false }) {
   };
   const now = useNow();
   const rec = data?.record;
+  // The attendance policy decides which clock-in modes are allowed.
+  const modes = data?.modes || ['office', 'remote', 'field'];
+  const activeMode = modes.includes(mode) ? mode : modes[0];
+  useEffect(() => { if (activeMode && activeMode !== mode) setMode(activeMode); }, [activeMode, mode]);
   const clockedIn = !!rec?.clock_in && !rec?.clock_out;
   const done = !!rec?.clock_out;
   const nowStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -69,7 +73,7 @@ export default function ClockWidget({ compact = false }) {
         </div>
         {!rec?.clock_in && (
           <div className="mt-4 flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-            {[['office', 'Office', Briefcase], ['remote', 'Remote', Home], ['field', 'Field', MapPin]].map(([v, l, Icon]) => (
+            {[['office', 'Office', Briefcase], ['remote', 'Remote', Home], ['field', 'Field', MapPin]].filter(([v]) => modes.includes(v)).map(([v, l, Icon]) => (
               <button key={v} onClick={() => setMode(v)} className={cx('flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition', mode === v ? 'bg-white shadow-sm dark:bg-slate-700' : 'text-slate-500')}>
                 <Icon size={13} /> {l}
               </button>

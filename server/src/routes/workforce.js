@@ -3,8 +3,9 @@ import { all, get, insert, update, run, tx } from '../db.js';
 import { requireRole, scopeSql, isHR, reportIds } from '../auth.js';
 import { crud } from '../crud.js';
 import {
-  audit, httpError, notify, today, parseDate, ymd, isWeekend, holidaySet, ensureLeaveBalances, round2,
+  audit, httpError, notify, today, parseDate, ymd, ensureLeaveBalances, offDayChecker, round2,
 } from '../utils.js';
+import { leaveRulesFor, employeeHolidayFilter, policyFor } from '../policies.js';
 
 export const workforceRouter = Router();
 
@@ -40,8 +41,7 @@ export const attendanceRequestsRouter = crud({
     }
     if (m.date > today()) throw httpError(400, `A ${TYPE_LABEL[m.type]} request must be for a day you already worked`);
     if (m.type === 'comp_off') {
-      const d = parseDate(m.date);
-      if (!isWeekend(d) && !holidaySet(ownerId).has(m.date)) throw httpError(400, 'Comp-off can only be claimed for work on a weekend or holiday');
+      if (!offDayChecker(ownerId)(parseDate(m.date))) throw httpError(400, 'Comp-off can only be claimed for work on a weekly off or holiday');
       if (!get('SELECT id FROM attendance WHERE employee_id = ? AND date = ? AND clock_in IS NOT NULL', ownerId, m.date)) {
         throw httpError(400, 'No attendance was recorded on that day');
       }
@@ -63,7 +63,9 @@ export const attendanceRequestsRouter = crud({
     if (row.type === 'comp_off') {
       const year = Number(row.date.slice(0, 4));
       ensureLeaveBalances(row.employee_id, year);
-      run(`UPDATE leave_balances SET allocated = allocated + 1 WHERE employee_id = ? AND year = ?
+      run(`INSERT OR IGNORE INTO leave_balances (employee_id, leave_type_id, year, allocated, used)
+           SELECT ?, id, ?, 0, 0 FROM leave_types WHERE code = 'CO'`, row.employee_id, year);
+      run(`UPDATE leave_balances SET adjustment = adjustment + 1 WHERE employee_id = ? AND year = ?
            AND leave_type_id = (SELECT id FROM leave_types WHERE code = 'CO')`, row.employee_id, year);
       return;
     }
@@ -75,11 +77,11 @@ export const attendanceRequestsRouter = crud({
       return;
     }
     // WFH / on-duty: mark each working day present with the right work mode.
-    const holidays = holidaySet(row.employee_id);
+    const isOff = offDayChecker(row.employee_id);
     const mode = row.type === 'wfh' ? 'remote' : 'field';
     for (let d = parseDate(row.date); d <= parseDate(row.end_date || row.date); d.setDate(d.getDate() + 1)) {
       const date = ymd(d);
-      if (isWeekend(d) || holidays.has(date)) continue;
+      if (isOff(d)) continue;
       const rec = get('SELECT id, clock_in FROM attendance WHERE employee_id = ? AND date = ?', row.employee_id, date);
       const note = row.type === 'wfh' ? 'Work from home (approved)' : 'On duty (approved)';
       if (rec) update('attendance', rec.id, rec.clock_in ? { work_mode: mode, notes: note } : { work_mode: mode, status: 'present', notes: note });
@@ -152,16 +154,18 @@ workforceRouter.post('/roster/copy-week', requireRole('admin', 'hr', 'manager'),
 });
 
 // ---------- optional (restricted) holidays ----------
-const optionalLimit = () => Number(get("SELECT value FROM settings WHERE key = 'optional_holiday_limit'")?.value) || 2;
+// The employee's holiday list sets how many optional holidays they may pick; the organisation setting is the fallback.
+const optionalLimit = (employeeId) => policyFor('holiday', employeeId)?.optional_limit ?? (Number(get("SELECT value FROM settings WHERE key = 'optional_holiday_limit'")?.value) || 2);
 
 workforceRouter.get('/optional-holidays', (req, res) => {
   const year = String(req.query.year || new Date().getFullYear());
+  const hf = employeeHolidayFilter(req.user.id);
   const rows = all(
     `SELECT h.*, EXISTS(SELECT 1 FROM optional_holiday_choices c WHERE c.holiday_id = h.id AND c.employee_id = ?) AS chosen,
             (SELECT COUNT(*) FROM optional_holiday_choices c WHERE c.holiday_id = h.id) AS takers
-     FROM holidays h WHERE h.type = 'Optional' AND substr(h.date, 1, 4) = ? ORDER BY h.date`, req.user.id, year,
+     FROM holidays h WHERE h.type = 'Optional' AND substr(h.date, 1, 4) = ? AND ${hf.sql} ORDER BY h.date`, req.user.id, year, ...hf.params,
   );
-  res.json({ limit: optionalLimit(), used: rows.filter((r) => r.chosen).length, holidays: rows });
+  res.json({ limit: optionalLimit(req.user.id), list: policyFor('holiday', req.user.id)?.name || null, used: rows.filter((r) => r.chosen).length, holidays: rows });
 });
 
 workforceRouter.post('/optional-holidays/:id', (req, res) => {
@@ -177,7 +181,7 @@ workforceRouter.post('/optional-holidays/:id', (req, res) => {
       `SELECT COUNT(*) AS n FROM optional_holiday_choices c JOIN holidays x ON x.id = c.holiday_id WHERE c.employee_id = ? AND substr(x.date, 1, 4) = ?`,
       req.user.id, h.date.slice(0, 4),
     ).n;
-    if (used >= optionalLimit()) throw httpError(400, `You can choose at most ${optionalLimit()} optional holidays a year`);
+    if (used >= optionalLimit(req.user.id)) throw httpError(400, `You can choose at most ${optionalLimit(req.user.id)} optional holidays a year`);
     if (get("SELECT id FROM leave_requests WHERE employee_id = ? AND status IN ('pending','manager_approved','approved') AND ? BETWEEN start_date AND end_date", req.user.id, h.date)) {
       throw httpError(409, 'You already have leave on that day');
     }
@@ -189,13 +193,14 @@ workforceRouter.post('/optional-holidays/:id', (req, res) => {
 
 // ---------- leave year-end processing ----------
 /**
- * Opens the next leave year: every leave type gets its annual quota; types marked "carry forward"
- * also get the unused balance (capped). Unused days above the cap are reported as encashable.
- * Safe to re-run: it recalculates next year's opening balances.
+ * Opens the next leave year. Unused balance of carry-forward leave moves into next year's `carried` (capped by
+ * the employee's leave plan rule, or the organisation cap for types without a plan); anything above the cap is
+ * reported as encashable when the rule allows encashment. Next year's entitlement comes from the plan.
+ * Safe to re-run: it recalculates next year's carried balances.
  */
 workforceRouter.post('/leave-year-end', requireRole('admin', 'hr'), (req, res) => {
   const year = Number(req.body.year) || new Date().getFullYear();
-  const cap = Number(get("SELECT value FROM settings WHERE key = 'carry_forward_cap'")?.value) || 30;
+  const orgCap = Number(get("SELECT value FROM settings WHERE key = 'carry_forward_cap'")?.value) || 30;
   const next = year + 1;
   const types = all('SELECT * FROM leave_types');
   const emps = all("SELECT id FROM employees WHERE status != 'exited'");
@@ -205,22 +210,27 @@ workforceRouter.post('/leave-year-end', requireRole('admin', 'hr'), (req, res) =
   tx(() => {
     for (const e of emps) {
       ensureLeaveBalances(e.id, year);
+      ensureLeaveBalances(e.id, next);
+      const lr = leaveRulesFor(e.id);
       for (const t of types) {
         if (t.code === 'LOP') continue;
+        const rule = lr?.rules.get(t.id);
+        if (lr && !rule) continue;
         const b = get('SELECT * FROM leave_balances WHERE employee_id = ? AND leave_type_id = ? AND year = ?', e.id, t.id, year);
-        const left = Math.max(0, (b?.allocated || 0) - (b?.used || 0));
-        const carry = t.carry_forward ? Math.min(left, cap) : 0;
-        const encash = t.carry_forward ? Math.max(0, left - cap) : 0;
+        const left = Math.max(0, (b?.allocated || 0) + (b?.carried || 0) + (b?.adjustment || 0) - (b?.used || 0));
+        const cap = rule ? Number(rule.carry_forward_cap) || 0 : t.carry_forward ? orgCap : 0;
+        const carry = Math.min(left, cap);
+        const encash = (rule ? rule.encashable : t.carry_forward) ? Math.max(0, left - cap) : 0;
         carried += carry;
         encashable += encash;
         if (carry || encash) details.push({ employee_id: e.id, leave_type: t.code, carry, encash });
-        run(`INSERT INTO leave_balances (employee_id, leave_type_id, year, allocated, used) VALUES (?, ?, ?, ?, 0)
-             ON CONFLICT(employee_id, leave_type_id, year) DO UPDATE SET allocated = excluded.allocated`, e.id, t.id, next, t.annual_quota + carry);
+        run(`INSERT INTO leave_balances (employee_id, leave_type_id, year, allocated, used, carried) VALUES (?, ?, ?, ?, 0, ?)
+             ON CONFLICT(employee_id, leave_type_id, year) DO UPDATE SET carried = excluded.carried`, e.id, t.id, next, rule ? 0 : t.annual_quota, carry);
       }
     }
     run("INSERT OR REPLACE INTO settings (key, value) VALUES ('leave_year_closed', ?)", String(year));
   });
   audit(req.user.id, 'leave_year_end', 'leave_balances', null, { year, carried, encashable });
-  res.json({ year, next_year: next, employees: emps.length, carried_days: round2(carried), encashable_days: round2(encashable), cap, details });
+  res.json({ year, next_year: next, employees: emps.length, carried_days: round2(carried), encashable_days: round2(encashable), cap: orgCap, details });
 });
 

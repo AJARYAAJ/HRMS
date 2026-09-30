@@ -32,7 +32,8 @@ export function migrate() {
   }
   addColumn('locations', 'holiday_list_id', 'INTEGER');
   addColumn('holidays', 'list_id', 'INTEGER');     // NULL = the default holiday list
-  addColumn('leave_balances', 'adjustment', 'REAL NOT NULL DEFAULT 0'); // carry-forward, comp-offs, penalties
+  addColumn('leave_balances', 'adjustment', 'REAL NOT NULL DEFAULT 0'); // comp-offs, penalties, manual corrections
+  addColumn('leave_balances', 'carried', 'REAL NOT NULL DEFAULT 0');    // carried forward from the previous year
   addColumn('expenses', 'distance_km', 'REAL');
   addColumn('expenses', 'days', 'REAL');
   addColumn('expenses', 'receipt_required', 'INTEGER DEFAULT 0');

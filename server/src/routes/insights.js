@@ -3,6 +3,7 @@ import { all, get } from '../db.js';
 import { isHR, reportIds, scopeSql, requireRole } from '../auth.js';
 import { today, monthRange, pad, ymd, httpError } from '../utils.js';
 import { approvalFlows, approvalHistory, FLOW_LABELS, saveApprovalFlows } from '../workflow.js';
+import { employeeHolidayFilter } from '../policies.js';
 
 export const dashboardRouter = Router();
 export const reportsRouter = Router();
@@ -109,7 +110,7 @@ dashboardRouter.get('/', (req, res) => {
     leave_balances: all(
       `SELECT lt.name, lt.code, lt.color, b.allocated, b.used FROM leave_balances b JOIN leave_types lt ON lt.id = b.leave_type_id
        WHERE b.employee_id = ? AND b.year = ? AND lt.code != 'LOP' ORDER BY lt.id`, u.id, year),
-    holidays: all('SELECT * FROM holidays WHERE date >= ? ORDER BY date LIMIT 5', t),
+    holidays: (() => { const f = employeeHolidayFilter(u.id); return all(`SELECT * FROM holidays h WHERE date >= ? AND ${f.sql} ORDER BY date LIMIT 5`, t, ...f.params); })(),
     celebrations: celebrations(30),
     announcements: all(`SELECT a.*, ${NAME('e')} AS author_name FROM announcements a LEFT JOIN employees e ON e.id = a.author_id ORDER BY a.pinned DESC, a.id DESC LIMIT 4`),
     on_leave_today: all(

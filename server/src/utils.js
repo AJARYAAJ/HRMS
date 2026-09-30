@@ -1,4 +1,5 @@
-import { all, insert, run } from './db.js';
+import { all, get, insert, run } from './db.js';
+import { policyFor, holidayListFilter, weeklyOffChecker, leaveRulesFor, entitlement } from './policies.js';
 import { emailEmployee, appUrl } from './mailer.js';
 
 export const pad = (n) => String(n).padStart(2, '0');
@@ -20,24 +21,42 @@ export const minutes = (t) => {
 };
 
 /**
- * Company holidays that are days off. Public holidays apply to everyone; optional (restricted) holidays
- * only apply to an employee who opted in to them.
+ * Holidays that are days off for an employee: the public holidays on their holiday list, plus optional
+ * (restricted) holidays they opted in to. Without an employee, the default list's public holidays.
  */
 export function holidaySet(employeeId) {
+  const list = policyFor('holiday', employeeId);
+  const f = holidayListFilter(list?.id);
   const rows = employeeId
-    ? all(`SELECT date FROM holidays WHERE type != 'Optional'
-           UNION SELECT h.date FROM holidays h JOIN optional_holiday_choices c ON c.holiday_id = h.id WHERE c.employee_id = ?`, employeeId)
-    : all("SELECT date FROM holidays WHERE type != 'Optional'");
+    ? all(`SELECT date FROM holidays h WHERE type != 'Optional' AND ${f.sql}
+           UNION SELECT h.date FROM holidays h JOIN optional_holiday_choices c ON c.holiday_id = h.id WHERE c.employee_id = ?`, ...f.params, employeeId)
+    : all(`SELECT date FROM holidays h WHERE type != 'Optional' AND ${f.sql}`, ...f.params);
   return new Set(rows.map((h) => h.date));
 }
 
-/** Working days between two dates inclusive, excluding weekends and holidays. */
-export function workingDaysBetween(start, end, holidays = holidaySet()) {
+/** Working days between two dates inclusive, excluding weekly offs (default Sat/Sun) and holidays. */
+export function workingDaysBetween(start, end, holidays = holidaySet(), isOff = isWeekend) {
   let count = 0;
   for (let d = parseDate(start); d <= parseDate(end); d.setDate(d.getDate() + 1)) {
-    if (!isWeekend(d) && !holidays.has(ymd(d))) count++;
+    if (!isOff(d) && !holidays.has(ymd(d))) count++;
   }
   return count;
+}
+
+/** (Date) => true when it is a weekly off or holiday for this employee under their assigned plans. */
+export function offDayChecker(employeeId) {
+  const holidays = holidaySet(employeeId);
+  const weeklyOff = weeklyOffChecker(employeeId);
+  const check = (d) => weeklyOff(d) || holidays.has(ymd(d));
+  check.weeklyOff = weeklyOff;
+  check.holidays = holidays;
+  return check;
+}
+
+/** An employee's working days between two dates, using their holiday list and weekly-off policy. */
+export function workingDaysFor(employeeId, start, end) {
+  const off = offDayChecker(employeeId);
+  return workingDaysBetween(start, end, off.holidays, off.weeklyOff);
 }
 
 export function monthRange(month) {
@@ -119,13 +138,30 @@ export function notifyHR(title, body, link) {
   for (const id of hrIds()) notify(id, title, body, link);
 }
 
+/**
+ * Makes sure the employee has a balance row for each leave type they are entitled to in a year.
+ * With a leave plan, `allocated` is recalculated from the plan (pro-rated for joiners, monthly accrual up to today);
+ * carry-forward, comp-offs, penalties and manual corrections live in `carried` / `adjustment`, so recalculation never loses them.
+ */
 export function ensureLeaveBalances(employeeId, year = new Date().getFullYear()) {
-  run(
-    `INSERT OR IGNORE INTO leave_balances (employee_id, leave_type_id, year, allocated, used)
-     SELECT ?, id, ?, annual_quota, 0 FROM leave_types`,
-    employeeId,
-    year,
-  );
+  const lr = leaveRulesFor(employeeId);
+  if (!lr) {
+    run(
+      `INSERT OR IGNORE INTO leave_balances (employee_id, leave_type_id, year, allocated, used)
+       SELECT ?, id, ?, annual_quota, 0 FROM leave_types`,
+      employeeId,
+      year,
+    );
+    return;
+  }
+  const join = get('SELECT date_of_joining FROM employees WHERE id = ?', employeeId)?.date_of_joining;
+  for (const [typeId, rule] of lr.rules) {
+    run(
+      `INSERT INTO leave_balances (employee_id, leave_type_id, year, allocated, used) VALUES (?, ?, ?, ?, 0)
+       ON CONFLICT(employee_id, leave_type_id, year) DO UPDATE SET allocated = excluded.allocated`,
+      employeeId, typeId, year, entitlement(rule, join, year, today()),
+    );
+  }
 }
 
 export function httpError(status, message) {

@@ -55,7 +55,7 @@ after(() => server.close());
 
 // ---------- approvals ----------
 test('two-level approval: manager approval moves an expense to HR, HR finalises it, history is recorded', async () => {
-  const exp = (await call('employee', 'POST', 'expenses', { category: 'Travel', amount: 1500, date: today(), description: 'Cab' })).body;
+  const exp = (await call('employee', 'POST', 'expenses', { category: 'Travel', amount: 450, date: today(), description: 'Cab' })).body;
   const m = await call('manager', 'PUT', `expenses/${exp.id}/decision`, { status: 'approved', comment: 'ok by me' });
   assert.equal(m.body.status, 'manager_approved');
   assert.equal((await call('manager', 'PUT', `expenses/${exp.id}/decision`, { status: 'approved' })).status, 403);
@@ -70,7 +70,7 @@ test('two-level approval: manager approval moves an expense to HR, HR finalises 
 
 test('approval flows are configurable per request type', async () => {
   await call('hr', 'PUT', 'approvals/flows', { expenses: 'manager' });
-  const exp = (await call('employee', 'POST', 'expenses', { category: 'Internet', amount: 999, date: today(), description: 'Broadband' })).body;
+  const exp = (await call('employee', 'POST', 'expenses', { category: 'Office Supplies', amount: 999, date: today(), description: 'Keyboard' })).body;
   assert.equal((await call('manager', 'PUT', `expenses/${exp.id}/decision`, { status: 'approved' })).body.status, 'approved');
   await call('hr', 'PUT', 'approvals/flows', { expenses: 'manager_hr' });
   const flows = (await call('employee', 'GET', 'approvals/flows')).body;
@@ -89,7 +89,7 @@ test('payroll runs per legal entity with company details on payslips; loans, rei
   await call('manager', 'PUT', `loans/${loan.id}/decision`, { status: 'approved' });
   assert.equal((await call('hr', 'PUT', `loans/${loan.id}/decision`, { status: 'approved' })).body.status, 'approved');
   // An approved expense gets reimbursed via payroll (together with any other approved, unpaid claims).
-  const exp = (await call('peer', 'POST', 'expenses', { category: 'Training', amount: 2500, date: today(), description: 'Course' })).body;
+  const exp = (await call('peer', 'POST', 'expenses', { category: 'Other', amount: 900, date: today(), description: 'Course' })).body;
   await call('hr', 'PUT', `expenses/${exp.id}/decision`, { status: 'approved' });
   const owed = get("SELECT SUM(amount) AS s FROM expenses WHERE employee_id = ? AND status = 'approved' AND payslip_id IS NULL", peer.id).s;
 
@@ -200,10 +200,10 @@ test('WFH request marks attendance remote; comp-off needs weekend work; overtime
   const weekday = nextWeekday(-10 - 2);
   assert.equal((await call('employee', 'POST', 'attendance-requests', { type: 'comp_off', date: weekday < today() ? weekday : addDays(today(), -1), reason: 'x' })).status, 400);
   const weekend = get("SELECT date FROM attendance WHERE employee_id = 4 AND strftime('%w', date) IN ('0','6') AND clock_in IS NOT NULL ORDER BY date DESC").date;
-  const before = get("SELECT allocated FROM leave_balances b JOIN leave_types t ON t.id = b.leave_type_id WHERE b.employee_id = 4 AND t.code = 'CO' AND b.year = ?", Number(weekend.slice(0, 4))).allocated;
+  const before = get("SELECT allocated + adjustment AS allocated FROM leave_balances b JOIN leave_types t ON t.id = b.leave_type_id WHERE b.employee_id = 4 AND t.code = 'CO' AND b.year = ?", Number(weekend.slice(0, 4))).allocated;
   const co = (await call('employee', 'POST', 'attendance-requests', { type: 'comp_off', date: weekend, reason: 'Release weekend' })).body;
   await call('manager', 'PUT', `attendance-requests/${co.id}/decision`, { status: 'approved' });
-  const after2 = get("SELECT allocated FROM leave_balances b JOIN leave_types t ON t.id = b.leave_type_id WHERE b.employee_id = 4 AND t.code = 'CO' AND b.year = ?", Number(weekend.slice(0, 4))).allocated;
+  const after2 = get("SELECT allocated + adjustment AS allocated FROM leave_balances b JOIN leave_types t ON t.id = b.leave_type_id WHERE b.employee_id = 4 AND t.code = 'CO' AND b.year = ?", Number(weekend.slice(0, 4))).allocated;
   assert.equal(after2, before + 1);
   assert.equal((await call('employee', 'POST', 'attendance-requests', { type: 'comp_off', date: weekend, reason: 'again' })).status, 409);
 });
@@ -244,11 +244,14 @@ test('optional holidays respect the yearly limit and leave year-end carries forw
   assert.equal((await call('employee', 'POST', `workforce/optional-holidays/${extra.id}`)).status, 400);
 
   const year = new Date().getFullYear();
-  run("UPDATE leave_balances SET allocated = 45, used = 5 WHERE employee_id = 4 AND year = ? AND leave_type_id = (SELECT id FROM leave_types WHERE code = 'EL')", year);
+  // Allocation comes from the leave plan (18 EL); a +27 correction and 5 used leave 40 unused days.
+  run("UPDATE leave_balances SET adjustment = 27, used = 5 WHERE employee_id = 4 AND year = ? AND leave_type_id = (SELECT id FROM leave_types WHERE code = 'EL')", year);
   const ye = (await call('hr', 'POST', 'workforce/leave-year-end', { year })).body;
   assert.ok(ye.details.some((d) => d.employee_id === 4 && d.leave_type === 'EL' && d.carry === 30 && d.encash === 10));
-  const nextEl = get("SELECT allocated FROM leave_balances WHERE employee_id = 4 AND year = ? AND leave_type_id = (SELECT id FROM leave_types WHERE code = 'EL')", year + 1).allocated;
-  assert.equal(nextEl, 18 + 30);
+  const nextEl = get("SELECT allocated, carried FROM leave_balances WHERE employee_id = 4 AND year = ? AND leave_type_id = (SELECT id FROM leave_types WHERE code = 'EL')", year + 1);
+  assert.deepEqual([nextEl.allocated, nextEl.carried], [18, 30]);
+  const nextBal = (await call('employee', 'GET', `leave/balances?year=${year + 1}`)).body.find((b) => b.code === 'EL');
+  assert.equal(nextBal.available, 48);
 });
 
 // ---------- letters, acknowledgements, custom fields, import, KB ----------

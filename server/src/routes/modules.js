@@ -3,6 +3,7 @@ import { all, get, insert, update, run, tx } from '../db.js';
 import { requireRole, isHR, canManage } from '../auth.js';
 import { crud } from '../crud.js';
 import { httpError, audit, notify, notifyHR, today } from '../utils.js';
+import { expenseCategoriesFor } from '../policies.js';
 import { createEmployee } from './employees.js';
 import { singleFile, removeFile, deleteAttachmentsFor } from '../uploads.js';
 import { saveAttachment } from './attachments.js';
@@ -229,15 +230,47 @@ kudosRouter.post('/', (req, res) => {
 export const expensesRouter = crud({
   table: 'expenses', label: 'expense claim', link: '/expenses',
   afterDelete: (row) => deleteAttachmentsFor('expenses', row.id),
-  fields: ['employee_id', 'category', 'amount', 'date', 'description'],
+  fields: ['employee_id', 'category', 'amount', 'date', 'description', 'distance_km', 'days'],
   owner: 'employee_id', selfService: true, approval: true, filters: ['status', 'employee_id', 'category'], dateField: 'date',
   select: `SELECT t.*, ${EMP_NAME('e')} AS employee_name, e.avatar_color, ${EMP_NAME('a')} AS approver_name,
            (SELECT COUNT(*) FROM attachments x WHERE x.entity = 'expenses' AND x.entity_id = t.id) AS attachment_count
            FROM expenses t JOIN employees e ON e.id = t.employee_id LEFT JOIN employees a ON a.id = t.approver_id`,
-  validate(data) {
-    if (data.amount !== undefined && !(Number(data.amount) > 0)) throw httpError(400, 'Amount must be greater than zero');
+  validate(data, user, existing) {
     if (data.date && data.date > today()) throw httpError(400, 'Expense date cannot be in the future');
-    return data;
+    const m = { ...existing, ...data };
+    const ownerId = m.employee_id ?? user.id;
+    const { policy, categories } = expenseCategoriesFor(ownerId);
+    const cat = policy && categories.find((c) => c.name === m.category);
+    if (policy && !cat) throw httpError(400, `"${m.category}" is not a category in your expense policy (${policy.name})`);
+    const out = { ...data };
+    if (cat?.kind === 'mileage') {
+      const km = Number(m.distance_km);
+      if (!(km > 0)) throw httpError(400, 'Enter the distance travelled in km');
+      out.distance_km = km; out.days = null; out.amount = Math.round(km * cat.rate * 100) / 100;
+    } else if (cat?.kind === 'per_diem') {
+      const days = Number(m.days);
+      if (!(days > 0 && days <= 60)) throw httpError(400, 'Enter the number of days (up to 60)');
+      out.days = days; out.distance_km = null; out.amount = Math.round(days * cat.rate * 100) / 100;
+    } else {
+      if (m.amount === undefined || !(Number(m.amount) > 0)) throw httpError(400, 'Amount must be greater than zero');
+      out.distance_km = null; out.days = null;
+    }
+    const amount = Number(out.amount ?? m.amount);
+    if (cat) {
+      if (cat.per_claim_limit && amount > cat.per_claim_limit) throw httpError(400, `${cat.name} claims are limited to ₹${cat.per_claim_limit} each`);
+      if (cat.monthly_limit && m.date) {
+        const used = get(`SELECT COALESCE(SUM(amount), 0) AS v FROM expenses WHERE employee_id = ? AND category = ? AND substr(date, 1, 7) = ?
+          AND status NOT IN ('rejected') AND id != ?`, ownerId, cat.name, m.date.slice(0, 7), existing?.id ?? 0).v;
+        if (used + amount > cat.monthly_limit) throw httpError(400, `This exceeds your monthly ${cat.name} limit of ₹${cat.monthly_limit} (₹${Math.round(used)} already claimed)`);
+      }
+      out.receipt_required = cat.receipt_above != null && amount > cat.receipt_above ? 1 : 0;
+    }
+    return out;
+  },
+  onDecision(row, status) {
+    if (status === 'approved' && row.receipt_required && !get("SELECT id FROM attachments WHERE entity = 'expenses' AND entity_id = ?", row.id)) {
+      throw httpError(400, 'A receipt is required for this claim under the expense policy; ask the employee to attach it first');
+    }
   },
   afterCreate(id, data) {
     const emp = get('SELECT manager_id, first_name FROM employees WHERE id = ?', data.employee_id);

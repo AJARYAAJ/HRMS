@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { all, get, insert, update, run, tx } from '../db.js';
 import { requireRole, scopeSql, isHR, canManage } from '../auth.js';
 import { crud } from '../crud.js';
-import { monthRange, workingDaysBetween, holidaySet, computePayslip, httpError, audit, notify, round2, today } from '../utils.js';
+import { monthRange, workingDaysBetween, offDayChecker, parseDate, computePayslip, httpError, audit, notify, round2, today } from '../utils.js';
 import { taxProfile, payrollSettings, fyOf, fyMonths } from '../tax.js';
 
 export const payrollRouter = Router();
@@ -25,27 +25,26 @@ payrollRouter.get('/runs', requireRole('admin', 'hr'), (req, res) => {
 
 /**
  * Loss-of-pay days = days before joining + past working days with no attendance or approved leave
- * (or approved LOP leave, whichever is higher). Future days in the month are assumed paid.
+ * (or approved LOP leave, whichever is higher) + late-mark penalties charged as loss of pay.
+ * Working days follow the employee's holiday list and weekly-off policy. Future days in the month are assumed paid.
  */
 function lopDays(employeeId, start, end, attEnd, workingDays, joinDate) {
   const effStart = joinDate && joinDate > start ? joinDate : start;
   if (effStart > end) return workingDays;
   const notJoined = workingDays - workingDaysBetween(effStart, end);
-  // Days before joining use the company calendar; days worked use the employee's own (incl. opted optional holidays).
-  const eligiblePast = effStart > attEnd ? 0 : workingDaysBetween(effStart, attEnd, holidaySet(employeeId));
-  const att = get(
-    `SELECT SUM(CASE WHEN status IN ('present','leave') THEN 1 WHEN status = 'half_day' THEN 0.5 ELSE 0 END) AS paid
-     FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ? AND strftime('%w', date) NOT IN ('0','6')
-     AND date NOT IN (SELECT date FROM holidays WHERE type != 'Optional')`,
-    employeeId, effStart, attEnd,
-  );
+  const isOff = offDayChecker(employeeId);
+  const eligiblePast = effStart > attEnd ? 0 : workingDaysBetween(effStart, attEnd, isOff.holidays, isOff.weeklyOff);
+  const paid = all("SELECT date, status FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ? AND status IN ('present','leave','half_day')", employeeId, effStart, attEnd)
+    .filter((r) => !isOff(parseDate(r.date)))
+    .reduce((a, r) => a + (r.status === 'half_day' ? 0.5 : 1), 0);
   const lopLeave = get(
     `SELECT COALESCE(SUM(r.days), 0) AS d FROM leave_requests r JOIN leave_types lt ON lt.id = r.leave_type_id
      WHERE r.employee_id = ? AND lt.code = 'LOP' AND r.status = 'approved' AND r.start_date BETWEEN ? AND ?`,
     employeeId, start, end,
   ).d;
-  const absent = Math.max(0, eligiblePast - (att?.paid || 0));
-  return Math.min(workingDays, notJoined + Math.max(absent, lopLeave));
+  const penalty = get("SELECT COALESCE(SUM(days), 0) AS d FROM attendance_penalties WHERE employee_id = ? AND month = ? AND status = 'applied' AND leave_type_id IS NULL", employeeId, start.slice(0, 7)).d;
+  const absent = Math.max(0, eligiblePast - paid);
+  return Math.min(workingDays, notJoined + Math.max(absent, lopLeave) + penalty);
 }
 
 /** Undo a run's side effects (loan EMIs, reimbursed expenses) so it can be recalculated. */

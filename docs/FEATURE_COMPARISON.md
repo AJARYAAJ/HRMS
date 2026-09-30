@@ -32,7 +32,13 @@ Legend: ✅ implemented · ◑ partly implemented (limits noted) · — not impl
 | Overtime calculated from the shift | Keka | ✅ | Attendance log and summary |
 | Weekly shift roster with copy-last-week | Zoho | ✅ | Shift roster |
 | Optional (restricted) holidays with a yearly quota | Keka, Zoho | ✅ | Leave → Optional holidays |
-| Leave year-end: carry forward with cap, encashable excess | Keka, Zoho | ✅ | Settings → Year end |
+| Leave year-end: carry forward with cap, encashable excess | Keka, Zoho | ✅ | Settings → Year end (cap per leave plan rule) |
+| Assignable leave plans: quota, yearly or monthly accrual, pro-rating for joiners, carry-forward cap, encashment, half days, notice, max consecutive days, probation, sandwich rule, gender | Keka, Zoho | ✅ | Policies → Leave plans |
+| Holiday lists per state/office, linked to locations, with their own optional-holiday quota | Keka, Zoho | ✅ | Policies → Holiday lists |
+| Weekly-off policies (e.g. Sunday + 2nd & 4th Saturday) used for leave, attendance and payroll | Keka, Zoho | ✅ | Policies → Weekly offs |
+| Attendance policies: allowed clock-in modes, geofence, grace, full/half-day hours, regularisation limit, overtime rules | Keka | ✅ | Policies → Attendance |
+| Late-mark penalties (every N late marks → days from a leave type or LOP), with waivers | Keka | ✅ | Policies → Late-mark penalties |
+| Bulk plan assignment | Keka | ✅ | Policies → Assign to employees |
 | Biometric device integration | Keka, Zoho | — | Clock-ins are web-only (or automatic from the activity agent) |
 
 ## Approvals
@@ -104,6 +110,19 @@ Legend: ✅ implemented · ◑ partly implemented (limits noted) · — not impl
 | Alerts: long idle, unproductive time, overwork/burnout | We360 | ✅ | Productivity → Alerts |
 | Auto clock-in from first activity | We360 | ✅ | Productivity → Settings |
 | Native desktop agent | We360 | ✅ | `agent/`: Windows and macOS builds with one-line installers, start at login, offline queue, browser domains, screenshots ([agent/README.md](../agent/README.md)). Builds are unsigned: code signing needs your organisation's certificates |
+
+## Professional services, analytics and export
+
+| Feature | Reference | PeopleHub | Where |
+| --- | --- | --- | --- |
+| Clients with contacts, GSTIN and payment terms | Keka PSA | ✅ | Clients |
+| Projects with billing type, members, bill/cost rates, milestones, budget burn and margin | Keka PSA | ✅ | Projects |
+| Opportunity pipeline with weighted value and convert-to-project | Keka PSA | ✅ | Opportunities |
+| Resource planner: allocations, utilisation, bench, overallocation | Keka PSA | ✅ | Resources |
+| Invoicing from billable time or milestones, GST, PDF, email, payments, ageing, project P&L | Keka PSA | ✅ | Finance |
+| Expense policies: categories, per-claim and monthly limits, mileage and per-diem rates, receipts required above an amount | Keka, Zoho | ✅ | Policies → Expenses; enforced on claims and approvals |
+| Bulk export of 17 datasets to Excel or CSV with filters and column picking, logged | Keka | ✅ | Bulk export |
+| Cross-module analytics: headcount, attrition, tenure, attendance, utilisation, pipeline, eNPS, revenue vs payroll | Keka, Zoho | ✅ | Analytics |
 
 ## Not implemented
 

@@ -30,12 +30,12 @@ test.describe.serial('Administration & insights', () => {
     await page.getByRole('tab', { name: 'Leave policy' }).click();
     await page.getByTestId('add-leave/types').click();
     const d = dialog(page, 'Add leave type');
-    await d.getByLabel('Name').fill('Paternity Leave');
-    await d.getByLabel('Code').fill('PTL');
+    await d.getByLabel('Name').fill('Bereavement Leave');
+    await d.getByLabel('Code').fill('BRV');
     await d.getByLabel('Annual quota (days)').fill('10');
     await d.getByRole('button', { name: 'Save' }).click();
     await expectToast(page, 'leave type added');
-    await expect(page.getByTestId('table-row').filter({ hasText: 'Paternity Leave' })).toBeVisible();
+    await expect(page.getByTestId('table-row').filter({ hasText: 'Bereavement Leave' })).toBeVisible();
   });
 
   test('HR offboards an employee and the exit checklist is created', async ({ page }) => {

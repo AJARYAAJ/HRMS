@@ -58,6 +58,8 @@ const RELATED = {
   opportunities: ['clients', 'projects'],
   resources: ['projects'],
   finance: ['projects', 'clients'],
+  policies: ['leave', 'attendance', 'expenses', 'holidays', 'dashboard', 'calendar', 'workforce'],
+  holidays: ['policies', 'attendance', 'leave', 'calendar', 'dashboard', 'workforce'],
 };
 
 export const api = createApi({

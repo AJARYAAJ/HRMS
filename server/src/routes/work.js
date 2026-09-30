@@ -3,6 +3,7 @@ import { all, get, insert, update, run } from '../db.js';
 import { isHR, reportIds, scopeSql } from '../auth.js';
 import { crud } from '../crud.js';
 import { httpError, notify, today, monthRange } from '../utils.js';
+import { employeeHolidayFilter } from '../policies.js';
 
 export const workRouter = Router();
 
@@ -106,9 +107,10 @@ workRouter.get('/calendar', (req, res) => {
   const events = [];
   const push = (type, date, title, extra = {}) => events.push({ type, date, title, ...extra });
 
+  const hf = employeeHolidayFilter(u.id);
   for (const h of all(
-    `SELECT h.* FROM holidays h WHERE h.date BETWEEN ? AND ? AND (h.type != 'Optional'
-       OR EXISTS (SELECT 1 FROM optional_holiday_choices c WHERE c.holiday_id = h.id AND c.employee_id = ?))`, start, end, u.id,
+    `SELECT h.* FROM holidays h WHERE h.date BETWEEN ? AND ? AND ${hf.sql} AND (h.type != 'Optional'
+       OR EXISTS (SELECT 1 FROM optional_holiday_choices c WHERE c.holiday_id = h.id AND c.employee_id = ?))`, start, end, ...hf.params, u.id,
   )) push('holiday', h.date, h.name, { subtitle: h.type });
 
   for (const l of all(

@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { all, get, insert, update, run, tx } from '../db.js';
 import { signToken, requireRole, isHR, reportIds } from '../auth.js';
 import { audit, notify, ensureLeaveBalances, httpError, today } from '../utils.js';
+import { verifyCode } from './idcards.js';
 import { emailEmployee, appUrl } from '../mailer.js';
 
 export const authRouter = Router();
@@ -25,7 +26,8 @@ const COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316', '#eab308'
 
 export function sanitize(emp, viewer) {
   if (!emp) return emp;
-  const { password_hash, ...rest } = emp;
+  const { password_hash, photo_file: photoFile, photo_type: _photoType, ...rest } = emp;
+  if (photoFile !== undefined) rest.photo_url = photoFile ? `/api/public/photo/${verifyCode(emp.id)}` : null;
   const full = isHR(viewer) || viewer.id === emp.id;
   if (!full) for (const k of SENSITIVE) delete rest[k];
   return rest;

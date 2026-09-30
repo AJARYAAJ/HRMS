@@ -20,6 +20,7 @@ import { clientsRouter, projectsRouter, opportunitiesRouter, resourcesRouter, fi
 import { exportsRouter } from './routes/exports.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { policiesRouter } from './routes/policies.js';
+import { idCardsRouter, publicVerifyRouter } from './routes/idcards.js';
 import { workRouter, travelRouter } from './routes/work.js';
 import { agentRouter, activityRouter } from './routes/activity.js';
 import { hrdocsRouter, lettersRouter, letterRequestsRouter, customFieldsRouter, kbRouter } from './routes/hrdocs.js';
@@ -50,6 +51,7 @@ export function createApp() {
   api.use('/careers', careersRouter); // public careers site
   api.use('/agent', agentRouter); // desktop activity agent (device-token auth)
   api.use('/agent-downloads', agentDownloadsRouter); // public agent builds and installers
+  api.use('/public', publicVerifyRouter); // ID card verification (QR code)
   api.use(authenticate);
   api.use('/auth', authRouter);
   api.use('/employees', employeesRouter);
@@ -79,6 +81,7 @@ export function createApp() {
   api.use('/exports', exportsRouter);
   api.use('/analytics', analyticsRouter);
   api.use('/policies', policiesRouter);
+  api.use('/id-cards', idCardsRouter);
   api.use('/timesheets', m.timesheetsRouter);
   api.use('/assets', m.assetsRouter);
   api.use('/tickets', m.ticketsRouter);

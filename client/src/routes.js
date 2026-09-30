@@ -2,7 +2,7 @@ import { lazy } from 'react';
 import {
   LayoutDashboard, CheckSquare, Clock, CalendarDays, Timer, Wallet, Receipt, LifeBuoy, FileText, GraduationCap, Laptop,
   Users, Network, UserPlus, Target, PartyPopper, Briefcase, Activity, Banknote, BarChart3, Building2, Settings, ShieldCheck, UserCircle,
-  LogOut, ListTodo, Plane, Calendar, CalendarRange, Building, FolderKanban, Crosshair, UsersRound, Landmark, PieChart, DownloadCloud, ScrollText,
+  LogOut, ListTodo, Plane, Calendar, CalendarRange, Building, FolderKanban, Crosshair, UsersRound, Landmark, PieChart, DownloadCloud, ScrollText, IdCard,
 } from 'lucide-react';
 
 // Every page is its own chunk; `load` is reused for hover-prefetching from the sidebar.
@@ -51,6 +51,7 @@ export const pages = {
   analytics: page(() => import('./pages/Analytics')),
   exports: page(() => import('./pages/Exports')),
   policies: page(() => import('./pages/Policies')),
+  idcard: page(() => import('./pages/IdCardPage')),
 };
 
 const ALL = ['admin', 'hr', 'manager', 'employee'];
@@ -75,6 +76,7 @@ export const navGroups = [
     { path: '/learning', label: 'Learning', icon: GraduationCap, page: 'learning', roles: ALL },
     { path: '/documents', label: 'Documents', icon: FileText, page: 'documents', roles: ALL },
     { path: '/assets', label: 'Assets', icon: Laptop, page: 'assets', roles: ALL },
+    { path: '/id-card', label: 'ID card', icon: IdCard, page: 'idcard', roles: ALL },
   ] },
   { label: 'People', items: [
     { path: '/employees', label: 'Employees', icon: Users, page: 'employees', roles: ALL },

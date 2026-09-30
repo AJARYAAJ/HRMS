@@ -63,8 +63,9 @@ export function PageSkeleton() {
 }
 
 // ---------- primitives ----------
-export function Avatar({ name, color = '#6366f1', size = 'md', className = '' }) {
+export function Avatar({ name, color = '#6366f1', size = 'md', className = '', src }) {
   const sizes = { xs: 'h-6 w-6 text-[10px]', sm: 'h-8 w-8 text-xs', md: 'h-10 w-10 text-sm', lg: 'h-14 w-14 text-lg', xl: 'h-20 w-20 text-2xl' };
+  if (src) return <img src={src} alt={name} title={name} className={cx('shrink-0 rounded-full object-cover ring-2 ring-white dark:ring-slate-900', sizes[size], className)} />;
   return (
     <div
       className={cx('flex shrink-0 items-center justify-center rounded-full font-semibold text-white ring-2 ring-white dark:ring-slate-900', sizes[size], className)}

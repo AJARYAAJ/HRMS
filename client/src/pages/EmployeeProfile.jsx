@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Mail, Phone, MapPin, Briefcase, Calendar, Pencil, UserMinus, KeyRound, Building2, User, Landmark, Laptop, FileText, Clock, ArrowLeft, FileSignature, ListPlus } from 'lucide-react';
+import { Mail, Phone, MapPin, Briefcase, Calendar, Pencil, UserMinus, KeyRound, Building2, User, Landmark, Laptop, FileText, Clock, ArrowLeft, FileSignature, ListPlus, IdCard } from 'lucide-react';
 import { useGet, useAction, useAuth, useDisclosure } from '../lib/hooks';
 import { Avatar, Badge, Tabs, Skeleton, CardSkeleton, EmptyState, Modal, MonthPicker, Progress } from '../components/ui';
 import { FormModal } from '../components/Form';
@@ -128,7 +128,7 @@ export default function EmployeeProfile() {
       <div className="card overflow-hidden">
         <div className="h-28 bg-gradient-to-r from-brand-500 via-violet-500 to-fuchsia-500" />
         <div className="flex flex-col gap-4 px-6 pb-6 sm:flex-row sm:items-end">
-          <Avatar name={name} color={e.avatar_color} size="xl" className="-mt-10 ring-4" />
+          <Avatar name={name} color={e.avatar_color} src={e.photo_url} size="xl" className="-mt-10 ring-4" />
           <div className="flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-bold text-slate-900 dark:text-white" data-testid="profile-name">{name}</h1>
@@ -141,6 +141,7 @@ export default function EmployeeProfile() {
               <span className="flex items-center gap-1.5"><MapPin size={14} />{e.location}</span>
             </div>
           </div>
+          {(isHR || self) && <Link to={self ? '/id-card' : `/id-card?employee=${e.id}`} className="btn-secondary btn-sm" data-testid="open-id-card"><IdCard size={14} /> ID card</Link>}
           {isHR && (
             <div className="flex flex-wrap gap-2">
               <button className="btn-secondary btn-sm" onClick={() => edit.onOpen()} data-testid="edit-employee"><Pencil size={14} /> Edit</button>

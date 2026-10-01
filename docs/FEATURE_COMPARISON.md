@@ -39,7 +39,9 @@ Legend: ✅ implemented · ◑ partly implemented (limits noted) · — not impl
 | Attendance policies: allowed clock-in modes, geofence, grace, full/half-day hours, regularisation limit, overtime rules | Keka | ✅ | Policies → Attendance |
 | Late-mark penalties (every N late marks → days from a leave type or LOP), with waivers | Keka | ✅ | Policies → Late-mark penalties |
 | Bulk plan assignment | Keka | ✅ | Policies → Assign to employees |
-| Biometric device integration | Keka, Zoho | — | Clock-ins are web-only (or automatic from the activity agent) |
+| Biometric device integration (ZKTeco / eSSL iclock push, JSON API for other devices), first-in / last-out, unmatched-ID mapping | Keka, Zoho | ✅ | Attendance devices |
+| Office clock-in limited to office IP ranges | Keka | ✅ | Policies → Attendance |
+| Automatic clock-out when people forget (at shift end, flagged for regularisation) | Keka | ✅ | Policies → Attendance |
 
 ## Approvals
 
@@ -109,6 +111,7 @@ Legend: ✅ implemented · ◑ partly implemented (limits noted) · — not impl
 | Screenshots (opt-in, visible to the employee, manager chain and HR) | We360 | ✅ | Activity timeline |
 | Alerts: long idle, unproductive time, overwork/burnout | We360 | ✅ | Productivity → Alerts |
 | Auto clock-in from first activity | We360 | ✅ | Productivity → Settings |
+| Workload & wellbeing: long days, days off worked, late nights, time since last leave, team comparison | We360 | ✅ | Analytics → Workload & wellbeing |
 | Native desktop agent | We360 | ✅ | `agent/`: Windows and macOS builds with one-line installers, start at login, offline queue, browser domains, screenshots ([agent/README.md](../agent/README.md)). Builds are unsigned: code signing needs your organisation's certificates |
 
 ## Professional services, analytics and export
@@ -140,9 +143,17 @@ Legend: ✅ implemented · ◑ partly implemented (limits noted) · — not impl
 | Unreturned assets recovered in full & final settlement | Keka | ✅ | Exit → F&F |
 | Digital ID card with photo and QR verification page; PNG, print / PDF and batch printing | Keka | ✅ | ID card |
 
+## Payroll structures
+
+| Feature | Reference | PeopleHub | Where |
+| --- | --- | --- | --- |
+| Salary templates: components as % of CTC, % of Basic, fixed or balancing; custom deductions | Keka, Zoho | ✅ | Payroll → Salary templates |
+| Employer PF and gratuity inside or outside CTC; PF wage cap; ESI threshold; professional tax per template | Keka | ✅ | Payroll → Salary templates |
+| Live salary breakup preview (monthly / annual, take-home, employer cost) | Keka | ✅ | Payroll → Salary templates |
+| Templates assigned per employee or department; component-wise payslips with employer contributions | Keka, Zoho | ✅ | Payroll, Payslips |
+
 ## Not implemented
 
-- Biometric device integration.
 - Native mobile apps.
 - Statutory e-filing (ECR, challans, TDS returns).
 - Direct bank APIs.

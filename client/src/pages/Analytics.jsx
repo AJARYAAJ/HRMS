@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { PieChart as PieIcon, Users, UserMinus, Clock3, Gauge, IndianRupee, Smile, Crosshair, Hourglass } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { useGet, useAuth } from '../lib/hooks';
-import { PageHeader, StatCard, StatSkeletons, CardSkeleton, cx } from '../components/ui';
+import { PageHeader, StatCard, StatSkeletons, CardSkeleton, Tabs, cx } from '../components/ui';
+import Wellbeing from './Wellbeing';
 import { useChartTheme } from '../lib/chart';
 import { compactMoney, money, monthLabel, titleCase } from '../lib/format';
 
@@ -21,6 +22,7 @@ function Panel({ title, subtitle, children, testId, className }) {
 export default function Analytics() {
   const { isHR } = useAuth();
   const [months, setMonths] = useState(6);
+  const [view, setView] = useState('overview');
   const { data, isLoading } = useGet('analytics', { months });
   const chart = useChartTheme();
   const axis = { tick: { fontSize: 11, fill: chart.axis }, axisLine: false, tickLine: false };
@@ -28,10 +30,12 @@ export default function Analytics() {
   return (
     <div className="space-y-6">
       <PageHeader icon={PieIcon} title="Analytics" subtitle="People, time, delivery and money in one view — trends over the selected period"
-        actions={<div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800" role="radiogroup" aria-label="Period">
+        actions={view === 'overview' && <div className="inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800" role="radiogroup" aria-label="Period">
           {[3, 6, 12].map((n) => <button key={n} role="radio" aria-checked={months === n} onClick={() => setMonths(n)} className={cx('rounded-lg px-3 py-1.5 text-sm font-semibold', months === n ? 'bg-white shadow-sm dark:bg-slate-700' : 'text-slate-500')}>{n} months</button>)}
         </div>} />
 
+      <Tabs value={view} onChange={setView} tabs={[{ value: 'overview', label: 'Overview' }, { value: 'wellbeing', label: 'Workload & wellbeing' }]} />
+      {view === 'wellbeing' ? <Wellbeing /> : <>
       {isLoading ? <StatSkeletons count={8} /> : (
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4" data-testid="analytics-kpis">
           <StatCard icon={Users} label="Headcount" value={k.headcount} hint={`${k.headcount_change >= 0 ? '+' : ''}${k.headcount_change} in the period`} />
@@ -132,6 +136,7 @@ export default function Analytics() {
           </Panel>
         </div>
       )}
+      </>}
     </div>
   );
 }

@@ -39,6 +39,16 @@ test.describe('Bulk export and analytics', () => {
     await expect(page.getByRole('radio', { name: '12 months' })).toHaveAttribute('aria-checked', 'true');
   });
 
+  test('workload & wellbeing compares teams and explains who needs attention', async ({ page }) => {
+    await loginAs(page, 'hr', '/analytics');
+    await page.getByRole('tab', { name: 'Workload & wellbeing' }).click();
+    await expect(page.getByTestId('wellbeing-kpis')).toContainText('High workload');
+    for (const id of ['chart-hours-trend', 'chart-overtime-trend', 'chart-team-hours']) await expect(page.getByTestId(id).locator('.recharts-surface').first()).toBeVisible();
+    await expect(page.getByTestId('wellbeing-table').getByTestId('table-row').first()).toBeVisible();
+    await page.getByRole('radio', { name: '90 days' }).click();
+    await expect(page.getByRole('radio', { name: '90 days' })).toHaveAttribute('aria-checked', 'true');
+  });
+
   test('managers see analytics without money; employees have neither page', async ({ page }) => {
     await loginAs(page, 'manager', '/analytics');
     await expect(page.getByTestId('analytics-kpis')).toContainText('Headcount');

@@ -131,3 +131,26 @@ test('analytics: money only for HR, employees blocked, period respected', async 
   assert.ok(!('revenue' in mgr.kpis) && !('revenue' in mgr.series[0]));
   assert.equal(mgr.kpis.headcount, hr.kpis.headcount);
 });
+
+test('wellbeing: risk flags from long days and weekly-off work; managers see only their reports; employees blocked', async () => {
+  assert.equal((await call('employee', 'GET', 'analytics/wellbeing')).status, 403);
+  const { run } = await import('../src/db.js');
+  // Ananya worked four 11-hour days, two of them on a weekend, finishing late.
+  const d = new Date(); d.setDate(d.getDate() - 1);
+  const days = [];
+  while (days.length < 6) { const s = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; days.push([s, [0, 6].includes(d.getDay())]); d.setDate(d.getDate() - 1); }
+  const weekend = days.filter(([, w]) => w).slice(0, 2).map(([s]) => s);
+  const weekdays = days.filter(([, w]) => !w).slice(0, 2).map(([s]) => s);
+  for (const s of [...weekend, ...weekdays]) {
+    run('DELETE FROM attendance WHERE employee_id = 4 AND date = ?', s);
+    run("INSERT INTO attendance (employee_id, date, clock_in, clock_out, status, work_mode) VALUES (4, ?, '10:15', '21:30', 'present', 'office')", s);
+  }
+  const hr = (await call('hr', 'GET', 'analytics/wellbeing?days=30')).body;
+  const ananya = hr.rows.find((r) => r.id === 4);
+  assert.ok(ananya.long_days >= 4 && ananya.off_days_worked >= 2 && ananya.late_finishes >= 4);
+  assert.notEqual(ananya.risk, 'low');
+  assert.ok(ananya.flags.some((f) => /weekly off/.test(f)));
+  assert.ok(hr.by_department.length > 1 && hr.trend.length >= 4);
+  const mgr = (await call('manager', 'GET', 'analytics/wellbeing')).body;
+  assert.ok(mgr.rows.length < hr.rows.length && mgr.rows.some((r) => r.id === 4));
+});

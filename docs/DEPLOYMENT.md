@@ -274,6 +274,27 @@ agent. In **Productivity → Devices → Register device** you get:
 
 See [agent/README.md](../agent/README.md) for what it records, permissions and code signing.
 
+## Step 10: Biometric attendance devices (optional)
+
+1. In PeopleHub go to **Administration → Attendance devices → Add device** and enter the device's serial number
+   (Menu → System info on most terminals). Copy the device key it shows — it appears only once.
+2. Put each employee's device user ID on their profile (**Edit → Biometric device user ID**), or map unknown IDs later
+   from the **Unmatched punches** tab.
+3. **ZKTeco / eSSL / other ADMS devices:** on the device open *Comm. → Cloud Server Setting* and set the server address
+   to your domain and the port to `80` (or `443` if the device supports HTTPS). The device then pushes punches to
+   `/iclock/cdata` on its own.
+   - Docker + Caddy: `/iclock/` is already served over plain HTTP, because many devices can't use HTTPS.
+   - Nginx + Certbot: Certbot turns the port-80 server into a redirect. Add this above the redirect in the port-80
+     `server` block, then run `sudo nginx -t && sudo systemctl reload nginx`:
+     ```nginx
+     location /iclock/ { proxy_pass http://127.0.0.1:4000; proxy_set_header Host $host; }
+     ```
+4. **Any other device or a sync tool:** POST punches as JSON to `https://YOUR-DOMAIN/api/biometric/punches` with the
+   header `X-Device-Key: <key>` and a body like
+   `{"punches":[{"user_id":"1004","time":"2026-10-01 09:30:00","direction":"in"}]}`.
+5. The device shows as **Online** within a few minutes of its first contact. Punches turn into clock-in (first punch)
+   and clock-out (last punch) for the day, using the employee's shift and attendance policy.
+
 ## Troubleshooting
 
 | Symptom | Fix |

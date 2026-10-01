@@ -6,3 +6,14 @@
 	}
 	reverse_proxy app:4000
 }
+
+# Biometric terminals (ZKTeco / eSSL "iclock" push) often speak plain HTTP and don't follow redirects to HTTPS.
+# Their endpoint is served over HTTP too; everything else on port 80 is redirected to HTTPS as usual.
+http://{$DOMAIN} {
+	handle /iclock/* {
+		reverse_proxy app:4000
+	}
+	handle {
+		redir https://{host}{uri} permanent
+	}
+}

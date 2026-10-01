@@ -80,7 +80,9 @@ $exe = Join-Path $env:TEMP ("peoplehub-agent-" + [guid]::NewGuid().ToString() + 
 Write-Host "Downloading the PeopleHub agent for Windows ($arch)..."
 Invoke-WebRequest -UseBasicParsing -Uri "$server/api/agent-downloads/peoplehub-agent-windows-$arch.exe" -OutFile $exe
 $log = "$exe.log"
-$p = Start-Process -FilePath $exe -ArgumentList @('setup', '--server', $server, '--token', $token) -Wait -PassThru -WindowStyle Hidden -RedirectStandardOutput $log
+# Wait for setup itself only, not for the agent process that setup leaves running in the background.
+$p = Start-Process -FilePath $exe -ArgumentList @('setup', '--server', $server, '--token', $token) -PassThru -WindowStyle Hidden -RedirectStandardOutput $log
+$p.WaitForExit()
 Get-Content $log | Write-Host
 Remove-Item $exe, $log -ErrorAction SilentlyContinue
 Remove-Item Env:\\PEOPLEHUB_TOKEN -ErrorAction SilentlyContinue

@@ -484,6 +484,8 @@ test('desktop agent: reports version/OS/host, idle settings reach the agent, bui
   assert.match(sh.body, /peoplehub-agent-macos-\$ARCH\.zip/);
   const ps = await call(null, 'GET', 'agent-downloads/install.ps1');
   assert.match(ps.body, new RegExp(`\\$server = '${base}'`));
+  assert.match(ps.body, /\$p\.WaitForExit\(\)/); // waits for setup only, not for the agent it leaves running
+  assert.doesNotMatch(ps.body, /-Wait\b/);
   // A spoofed Host header must never be echoed into the installer scripts (fetch can't set Host, so use http).
   const http = await import('node:http');
   const evilStatus = await new Promise((resolve, reject) => {

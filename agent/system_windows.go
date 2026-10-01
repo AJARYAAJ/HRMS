@@ -95,11 +95,20 @@ func startBackground() error {
 	if _, err := os.Stat(exe); err != nil {
 		exe, _ = os.Executable()
 	}
-	cmd := exec.Command(exe, "run")
-	const detachedProcess, createNewProcessGroup, createNoWindow = 0x00000008, 0x00000200, 0x08000000
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: detachedProcess | createNewProcessGroup | createNoWindow}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("could not start the agent: %w", err)
+	const detachedProcess, createNewProcessGroup, createNoWindow, breakawayFromJob = 0x00000008, 0x00000200, 0x08000000, 0x01000000
+	start := func(flags uint32) (*exec.Cmd, error) {
+		cmd := exec.Command(exe, "run")
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: flags}
+		return cmd, cmd.Start()
+	}
+	// Leave the installer's job object when allowed, so whatever launched setup (an installer, a terminal) isn't
+	// kept waiting on the long-running agent; fall back when the job forbids breakaway.
+	base := uint32(detachedProcess | createNewProcessGroup | createNoWindow)
+	cmd, err := start(base | breakawayFromJob)
+	if err != nil {
+		if cmd, err = start(base); err != nil {
+			return fmt.Errorf("could not start the agent: %w", err)
+		}
 	}
 	return cmd.Process.Release()
 }

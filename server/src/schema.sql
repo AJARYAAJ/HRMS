@@ -1154,3 +1154,28 @@ CREATE TABLE IF NOT EXISTS payslip_lines (
   amount REAL NOT NULL,
   sort INTEGER DEFAULT 0
 );
+
+-- ---------- biometric / attendance terminals ----------
+CREATE TABLE IF NOT EXISTS biometric_devices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  serial_no TEXT NOT NULL UNIQUE,                -- the device's SN (ZKTeco / eSSL push) — also accepted with the API key
+  location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+  key_hash TEXT NOT NULL,
+  key_prefix TEXT NOT NULL,
+  active INTEGER DEFAULT 1,
+  last_seen_at TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS punch_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  device_id INTEGER REFERENCES biometric_devices(id) ON DELETE SET NULL,
+  biometric_id TEXT NOT NULL,                    -- user id / card number enrolled on the device
+  employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  punched_at TEXT NOT NULL,                      -- local time YYYY-MM-DD HH:MM:SS
+  direction TEXT,                                -- in | out | NULL (device did not say)
+  verify TEXT,                                   -- fingerprint | face | card | password
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(device_id, biometric_id, punched_at)
+);

@@ -54,6 +54,14 @@ export function migrate() {
   addColumn('payslips', 'employer_pf', 'REAL DEFAULT 0');
   addColumn('payslips', 'employer_esi', 'REAL DEFAULT 0');
   addColumn('payslips', 'gratuity', 'REAL DEFAULT 0');
+  addColumn('employees', 'biometric_id', 'TEXT');
+  addColumn('attendance_policies', 'allow_biometric', 'INTEGER DEFAULT 1');
+  addColumn('attendance_policies', 'allowed_ips', 'TEXT');           // office clock-in only from these IPs / CIDR ranges
+  addColumn('attendance_policies', 'auto_clock_out', 'INTEGER DEFAULT 0');
+  addColumn('attendance_policies', 'auto_clock_out_hours', 'REAL DEFAULT 4'); // close open days this long after shift end
+  addColumn('attendance', 'source', "TEXT DEFAULT 'web'");               // web | biometric | agent | regularized | auto
+  addColumn('attendance', 'auto_clock_out', 'INTEGER DEFAULT 0');
+  addColumn('attendance', 'ip', 'TEXT');
   addColumn('employees', 'buddy_id', 'INTEGER');
   addColumn('onboarding_tasks', 'done_at', 'TEXT');
   addColumn('onboarding_tasks', 'done_by', 'INTEGER');

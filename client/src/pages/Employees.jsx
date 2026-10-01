@@ -19,6 +19,7 @@ export const employeeFields = (isAdmin) => [
   { name: 'designation_id', label: 'Designation', type: 'lookup', path: 'designations', labelKey: 'title' },
   { name: 'location_id', label: 'Location', type: 'lookup', path: 'locations' },
   { name: 'shift_id', label: 'Shift', type: 'lookup', path: 'shifts', labelKey: (s) => `${s.name} (${s.start_time}–${s.end_time})` },
+  { name: 'biometric_id', label: 'Biometric device user ID', placeholder: 'ID enrolled on the attendance device' },
   { name: 'manager_id', label: 'Reporting manager', type: 'employee' },
   { name: 'role', label: 'Access role', type: 'select', noEmpty: true, options: [['employee', 'Employee'], ['manager', 'Manager'], ['hr', 'HR'], ...(isAdmin ? [['admin', 'Admin']] : [])] },
   { name: 'employment_type', label: 'Employment type', type: 'select', noEmpty: true, options: ['Full-time', 'Part-time', 'Contract', 'Intern'] },

@@ -111,6 +111,20 @@ export function entitlement(rule, joinDate, year, asOf) {
 // ---------- attendance & expense ----------
 export const attendancePolicyFor = (employeeId) => policyFor('attendance', employeeId);
 
+const ipToInt = (ip) => ip.split('.').reduce((a, o) => (a << 8) + Number(o), 0) >>> 0;
+/** True when an IPv4 address (IPv4-mapped IPv6 accepted) falls in any of "a.b.c.d" / "a.b.c.d/n" ranges. */
+export function ipAllowed(ip, ranges) {
+  if (!ranges) return true;
+  const addr = String(ip || '').replace(/^::ffff:/, '');
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(addr)) return false;
+  const a = ipToInt(addr);
+  return String(ranges).split(/[\s,]+/).filter(Boolean).some((r) => {
+    const [net, bits = '32'] = r.split('/');
+    const mask = Number(bits) === 0 ? 0 : (~0 << (32 - Number(bits))) >>> 0;
+    return (a & mask) === (ipToInt(net) & mask);
+  });
+}
+
 export function expenseCategoriesFor(employeeId) {
   const policy = policyFor('expense', employeeId);
   if (!policy) return { policy: null, categories: [] };

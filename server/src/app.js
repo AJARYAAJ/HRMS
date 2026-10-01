@@ -22,6 +22,7 @@ import { analyticsRouter } from './routes/analytics.js';
 import { policiesRouter } from './routes/policies.js';
 import { idCardsRouter, publicVerifyRouter } from './routes/idcards.js';
 import { salaryRouter } from './routes/salary.js';
+import { devicesRouter, biometricIngestRouter, iclockRouter } from './routes/biometric.js';
 import { assetsRouter, assetRequestsRouter } from './routes/assets.js';
 import { docsExtraRouter, documentTypesRouter } from './routes/docs.js';
 import { preboardingRouter, joinRouter, onboardingTemplatesRouter, myOnboarding, setBuddy } from './routes/preboarding.js';
@@ -56,6 +57,7 @@ export function createApp() {
   api.use('/agent', agentRouter); // desktop activity agent (device-token auth)
   api.use('/agent-downloads', agentDownloadsRouter); // public agent builds and installers
   api.use('/public', publicVerifyRouter); // ID card verification (QR code)
+  api.use('/biometric', biometricIngestRouter); // attendance terminals (device key)
   api.use('/join', joinRouter); // pre-boarding portal for new hires (token link)
   api.use(authenticate);
   api.use('/auth', authRouter);
@@ -88,6 +90,7 @@ export function createApp() {
   api.use('/policies', policiesRouter);
   api.use('/id-cards', idCardsRouter);
   api.use('/salary', salaryRouter);
+  api.use('/attendance-devices', devicesRouter);
   api.use('/preboarding', preboardingRouter);
   api.use('/onboarding-templates', onboardingTemplatesRouter);
   api.get('/onboarding/my', myOnboarding);
@@ -130,6 +133,7 @@ export function createApp() {
   api.use('/activity', activityRouter);
   api.use('/emails', emailsRouter);
   api.use((req, res) => res.status(404).json({ error: 'Not found' }));
+  app.use('/iclock', iclockRouter); // ZKTeco / eSSL push protocol (devices address the server root)
   app.use('/api', api);
 
   // Serve the built SPA when it exists (production / e2e).

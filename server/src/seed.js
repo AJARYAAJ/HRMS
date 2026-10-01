@@ -636,6 +636,18 @@ export function seed({ reset = true } = {}) {
     const reqBy = emps.find((x) => x.dept === 'Design' && x.id !== emp) || emps[5];
     insert('asset_requests', { employee_id: reqBy.id, category: 'Accessory', reason: 'Drawing tablet for illustrations', status: 'approved', approver_id: hr });
 
+    // ---------- biometric terminal ----------
+    // Bengaluru staff are enrolled on the reception terminal with their employee number as the device user ID.
+    const bioDevice = insert('biometric_devices', {
+      name: 'Reception – Bengaluru HQ', serial_no: 'BLR-HQ-01', location_id: loc[0], last_seen_at: new Date().toISOString(),
+      key_hash: crypto.createHash('sha256').update(crypto.randomBytes(20)).digest('hex'), key_prefix: 'bio_demo00',
+    });
+    run("UPDATE employees SET biometric_id = substr(emp_code, 4) WHERE location_id = ? AND status != 'exited'", loc[0]);
+    for (const [bid, mins] of [['9001', 0], ['9001', 545]]) {
+      const at = new Date(today); at.setHours(9, 12 + mins, 0, 0);
+      insert('punch_logs', { device_id: bioDevice, biometric_id: bid, punched_at: `${ymd(at)} ${pad(at.getHours())}:${pad(at.getMinutes())}:00`, verify: 'fingerprint' });
+    }
+
     // ---------- buddies and pre-boarding ----------
     for (const e of emps.filter((x) => x.date_of_joining >= ymd(addDays(today, -60)))) {
       const peer = emps.find((x) => x.dept === e.dept && x.id !== e.id && x.date_of_joining < ymd(addDays(today, -365)) && x.role === 'employee');

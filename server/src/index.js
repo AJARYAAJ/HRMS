@@ -1,5 +1,6 @@
 import { migrate, get } from './db.js';
 import { remindExpiringDocuments } from './routes/docs.js';
+import { autoClockOut } from './routes/attendance.js';
 import { seed } from './seed.js';
 import { createApp } from './app.js';
 import { startMailer, smtpConfig } from './mailer.js';
@@ -33,5 +34,7 @@ createApp().listen(port, () => console.log(`PeopleHub HRMS API running on http:/
 
 // Daily housekeeping: remind employees about documents that expire within 30 days.
 const housekeeping = () => { try { remindExpiringDocuments(); } catch (e) { console.error('[jobs] document reminders failed', e); } };
+// Every 30 minutes: close attendance days left open under policies with automatic clock-out.
+setInterval(() => { try { autoClockOut(); } catch (e) { console.error('[jobs] auto clock-out failed', e); } }, 30 * 60_000).unref();
 setTimeout(housekeeping, 60_000).unref();
 setInterval(housekeeping, 24 * 3600_000).unref();

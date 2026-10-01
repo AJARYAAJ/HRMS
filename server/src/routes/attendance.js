@@ -6,7 +6,7 @@ import {
   today, nowTime, minutes, httpError, monthRange, audit, notify,
   ensureLeaveBalances, parseDate, ymd, notifyHR, workingDaysFor, offDayChecker,
 } from '../utils.js';
-import { attendancePolicyFor, leaveRulesFor, policyFor, holidayListFilter } from '../policies.js';
+import { attendancePolicyFor, leaveRulesFor, policyFor, holidayListFilter, ipAllowed } from '../policies.js';
 
 export const attendanceRouter = Router();
 export const leaveRouter = Router();
@@ -65,6 +65,29 @@ export function evaluateDay(clockIn, clockOut, shift, policy = null) {
 const MODE_ALLOWED = { office: 'allow_web', remote: 'allow_remote', field: 'allow_field' };
 const MODE_LABEL = { office: 'office', remote: 'remote', field: 'field' };
 
+/**
+ * Automatic clock-out: for employees whose attendance policy enables it, a day still open N hours after the shift
+ * ended is closed at the shift's end time (flagged, so it can be regularised). Runs periodically.
+ */
+export function autoClockOut(now = new Date()) {
+  const open = all("SELECT a.* FROM attendance a WHERE a.clock_in IS NOT NULL AND a.clock_out IS NULL AND a.date <= ?", ymd(now));
+  let closed = 0;
+  for (const rec of open) {
+    const policy = attendancePolicyFor(rec.employee_id);
+    if (!policy?.auto_clock_out) continue;
+    const shift = shiftFor(rec.employee_id, rec.date);
+    const end = parseDate(rec.date);
+    end.setHours(0, minutes(shift.end_time) + Math.round((policy.auto_clock_out_hours ?? 4) * 60), 0, 0);
+    if (now < end) continue;
+    const out = minutes(shift.end_time) > minutes(rec.clock_in) ? shift.end_time : rec.clock_in;
+    const { status, late } = evaluateDay(rec.clock_in, out, shift, policy);
+    update('attendance', rec.id, { clock_out: out, status, late, auto_clock_out: 1, notes: [rec.notes, 'Auto clock-out at shift end'].filter(Boolean).join(' · ') });
+    notify(rec.employee_id, 'You were clocked out automatically', `You didn't clock out on ${rec.date}; we recorded ${out} (your shift end). Raise a regularization if that's wrong.`, '/attendance', { email: false });
+    closed++;
+  }
+  return closed;
+}
+
 // ---------- attendance ----------
 attendanceRouter.get('/today', (req, res) => {
   const record = get('SELECT * FROM attendance WHERE employee_id = ? AND date = ?', req.user.id, today());
@@ -83,9 +106,13 @@ attendanceRouter.post('/clock-in', (req, res) => {
   if (policy && policy[MODE_ALLOWED[work_mode]] === 0) {
     throw httpError(400, `Your attendance policy (${policy.name}) does not allow ${MODE_LABEL[work_mode]} clock-in`);
   }
+  // Office clock-in can be limited to the office network.
+  if (work_mode === 'office' && policy?.allowed_ips && !ipAllowed(req.ip, policy.allowed_ips)) {
+    throw httpError(400, 'Office clock-in is only allowed from the office network. Connect to office Wi-Fi or choose Remote / Field.');
+  }
   const { distance, ...geo } = checkGeofence(req.user.id, Number(req.body?.latitude ?? NaN), Number(req.body?.longitude ?? NaN), work_mode, policy);
   if (existing) update('attendance', existing.id, { clock_in: time, status: 'present', late, work_mode, ...geo });
-  else insert('attendance', { employee_id: req.user.id, date: today(), clock_in: time, status: 'present', late, work_mode, ...geo });
+  else insert('attendance', { employee_id: req.user.id, date: today(), clock_in: time, status: 'present', late, work_mode, ...geo, source: 'web', ip: req.ip });
   audit(req.user.id, 'clock_in', 'attendance', null, { time, work_mode, ...geo, distance });
   res.json(get('SELECT * FROM attendance WHERE employee_id = ? AND date = ?', req.user.id, today()));
 });

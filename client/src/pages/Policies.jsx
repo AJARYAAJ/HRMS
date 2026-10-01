@@ -280,6 +280,10 @@ const ATT_FIELDS = (types) => [
   { name: 'penalty_leave_type_id', label: 'Deduct from', type: 'select', options: types.filter((t) => t.code !== 'LOP').map((t) => [t.id, t.name]), placeholder: 'Loss of pay' },
   { name: 'max_regularizations', label: 'Regularizations per month', type: 'number', min: 0, max: 31, placeholder: 'Unlimited' },
   { name: 'overtime_min_minutes', label: 'Minimum overtime (minutes)', type: 'number', min: 0, max: 600, default: 30 },
+  { name: 'allow_biometric', label: 'Biometric device punches count', type: 'checkbox', default: 1 },
+  { name: 'auto_clock_out', label: 'Automatic clock-out when people forget', type: 'checkbox', default: 0 },
+  { name: 'auto_clock_out_hours', label: 'Auto clock-out after shift end (hours)', type: 'number', min: 0, max: 12, step: 0.5, default: 4, hidden: (v) => !v.auto_clock_out },
+  { name: 'allowed_ips', label: 'Office clock-in only from these IPs / ranges', placeholder: 'e.g. 203.0.113.0/24, 198.51.100.7', full: true, hint: 'Empty = any network. Remote and field clock-ins are not restricted.' },
 ];
 
 function AttendanceDetail({ plan }) {
@@ -291,6 +295,9 @@ function AttendanceDetail({ plan }) {
     ['Late-mark penalty', plan.late_penalty_every ? `${plan.late_penalty_days} day(s) from ${plan.penalty_leave_type || 'pay (LOP)'} for every ${plan.late_penalty_every} late marks in a month` : 'None'],
     ['Regularizations', plan.max_regularizations != null ? `${plan.max_regularizations} per month` : 'Unlimited'],
     ['Overtime', plan.overtime_allowed ? `Recorded beyond the shift, at least ${plan.overtime_min_minutes} min` : 'Not recorded'],
+    ['Biometric devices', plan.allow_biometric === 0 ? 'Punches ignored' : 'Punches mark attendance (first in, last out)'],
+    ['Office network', plan.allowed_ips ? `Office clock-in only from ${plan.allowed_ips}` : 'Any network'],
+    ['Automatic clock-out', plan.auto_clock_out ? `At shift end, ${plan.auto_clock_out_hours} h after the shift if not clocked out` : 'Off'],
   ];
   return (
     <dl className="grid gap-3 sm:grid-cols-2" data-testid="attendance-rules">

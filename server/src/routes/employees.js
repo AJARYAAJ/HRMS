@@ -219,7 +219,7 @@ const EDITABLE = [
   'emp_code', 'first_name', 'last_name', 'email', 'phone', 'role', 'department_id', 'designation_id', 'location_id',
   'shift_id', 'manager_id', 'date_of_joining', 'date_of_birth', 'gender', 'marital_status', 'blood_group',
   'employment_type', 'status', 'address', 'emergency_contact', 'pan', 'uan', 'bank_name', 'bank_account', 'ifsc', 'annual_ctc',
-  'company_id', 'probation_end_date', 'confirmation_status', 'tax_regime', 'buddy_id',
+  'company_id', 'probation_end_date', 'confirmation_status', 'tax_regime', 'buddy_id', 'biometric_id',
 ];
 
 function nextEmpCode() {
@@ -322,6 +322,10 @@ employeesRouter.put('/:id', requireRole('admin', 'hr'), (req, res) => {
   if (data.role === 'admin' && req.user.role !== 'admin') throw httpError(403, 'Only admins can grant the admin role');
   if (data.manager_id && Number(data.manager_id) === emp.id) throw httpError(400, 'An employee cannot report to themselves');
   if (data.email && get('SELECT id FROM employees WHERE lower(email) = lower(?) AND id != ?', data.email, emp.id)) throw httpError(409, 'Email already in use');
+  if ('biometric_id' in data) {
+    data.biometric_id = String(data.biometric_id ?? '').trim() || null;
+    if (data.biometric_id && get('SELECT id FROM employees WHERE biometric_id = ? AND id != ?', data.biometric_id, emp.id)) throw httpError(409, 'This biometric user ID belongs to another employee');
+  }
   tx(() => {
     update('employees', emp.id, data);
     if (req.body.custom && typeof req.body.custom === 'object') saveCustomFields(emp.id, req.body.custom, req.user);

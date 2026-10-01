@@ -24,6 +24,7 @@ const RELATED = {
   leave: ['attendance', 'approvals', 'dashboard', 'reports'],
   regularizations: ['attendance', 'approvals', 'dashboard'],
   attendance: ['dashboard', 'reports'],
+  'attendance-devices': ['attendance', 'employees'],
   expenses: ['approvals', 'dashboard'],
   timesheets: ['approvals', 'projects', 'finance'],
   'tax-declarations': ['approvals'],

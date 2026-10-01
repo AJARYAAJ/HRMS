@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { isIPv4 } from 'node:net';
 import { all, get, insert, update, run, tx } from '../db.js';
 import { requireRole, canManage } from '../auth.js';
 import { audit, httpError, notify, monthRange, ensureLeaveBalances, round2 } from '../utils.js';
@@ -21,6 +22,16 @@ const num = (v, { min = 0, max = Infinity, allowNull = true, label = 'Value' } =
   if (!Number.isFinite(n) || n < min || n > max) throw httpError(400, `${label} must be between ${min} and ${max === Infinity ? 'any' : max}`);
   return n;
 };
+/** Normalises "10.0.0.0/8, 203.0.113.7" and rejects anything that is not an IPv4 address or CIDR range. */
+function cleanIpRanges(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const parts = String(v).split(/[\s,]+/).filter(Boolean);
+  for (const p of parts) {
+    const [ip, bits] = p.split('/');
+    if (!isIPv4(ip) || (bits !== undefined && !(Number(bits) >= 0 && Number(bits) <= 32 && /^\d+$/.test(bits)))) throw httpError(400, `"${p}" is not an IP address or range like 203.0.113.0/24`);
+  }
+  return parts.join(', ');
+}
 const flag = (v) => (v === true || v === 1 || v === '1' || v === 'true' ? 1 : 0);
 
 /** Per-kind editable fields and validation. */
@@ -46,7 +57,8 @@ const SPECS = {
   },
   attendance: {
     fields: ['name', 'description', 'allow_web', 'allow_remote', 'allow_field', 'geofence_mode', 'grace_minutes', 'full_day_hours', 'half_day_hours',
-      'late_penalty_every', 'late_penalty_days', 'penalty_leave_type_id', 'max_regularizations', 'overtime_allowed', 'overtime_min_minutes'],
+      'late_penalty_every', 'late_penalty_days', 'penalty_leave_type_id', 'max_regularizations', 'overtime_allowed', 'overtime_min_minutes',
+      'allow_biometric', 'allowed_ips', 'auto_clock_out', 'auto_clock_out_hours'],
     clean(b) {
       const out = {
         allow_web: flag(b.allow_web ?? 1), allow_remote: flag(b.allow_remote ?? 1), allow_field: flag(b.allow_field ?? 1),
@@ -60,6 +72,10 @@ const SPECS = {
         max_regularizations: num(b.max_regularizations, { max: 31, label: 'Regularizations per month' }),
         overtime_allowed: flag(b.overtime_allowed ?? 1),
         overtime_min_minutes: num(b.overtime_min_minutes, { max: 600, label: 'Minimum overtime' }) ?? 30,
+        allow_biometric: flag(b.allow_biometric ?? 1),
+        allowed_ips: cleanIpRanges(b.allowed_ips),
+        auto_clock_out: flag(b.auto_clock_out ?? 0),
+        auto_clock_out_hours: num(b.auto_clock_out_hours, { min: 0, max: 12, label: 'Auto clock-out delay' }) ?? 4,
       };
       if (!out.allow_web && !out.allow_remote && !out.allow_field) throw httpError(400, 'Allow at least one way to clock in');
       if (out.full_day_hours != null && out.half_day_hours != null && out.half_day_hours >= out.full_day_hours) throw httpError(400, 'Half-day hours must be less than full-day hours');

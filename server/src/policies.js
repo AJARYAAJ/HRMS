@@ -1,3 +1,4 @@
+import { BlockList, isIPv4, isIPv6 } from 'node:net';
 import { all, get } from './db.js';
 
 /**
@@ -111,18 +112,31 @@ export function entitlement(rule, joinDate, year, asOf) {
 // ---------- attendance & expense ----------
 export const attendancePolicyFor = (employeeId) => policyFor('attendance', employeeId);
 
-const ipToInt = (ip) => ip.split('.').reduce((a, o) => (a << 8) + Number(o), 0) >>> 0;
-/** True when an IPv4 address (IPv4-mapped IPv6 accepted) falls in any of "a.b.c.d" / "a.b.c.d/n" ranges. */
+/** Parse "a.b.c.d", "a.b.c.d/n", "2001:db8::1" or "2001:db8::/32" into a node:net BlockList (null when invalid). */
+export function ipRangeList(ranges) {
+  const list = new BlockList();
+  for (const r of String(ranges || '').split(/[\s,]+/).filter(Boolean)) {
+    const [net, bits] = r.split('/');
+    const family = isIPv4(net) ? 'ipv4' : isIPv6(net) ? 'ipv6' : null;
+    if (!family) return null;
+    if (bits === undefined) { list.addAddress(net, family); continue; }
+    const n = Number(bits);
+    if (!/^\d+$/.test(bits) || n > (family === 'ipv4' ? 32 : 128)) return null;
+    list.addSubnet(net, n, family);
+  }
+  return list;
+}
+
+/** True when an address falls in any of the ranges. IPv4-mapped IPv6 is treated as IPv4; ::1 and 127.0.0.1 count as the same loopback. */
 export function ipAllowed(ip, ranges) {
   if (!ranges) return true;
-  const addr = String(ip || '').replace(/^::ffff:/, '');
-  if (!/^\d+\.\d+\.\d+\.\d+$/.test(addr)) return false;
-  const a = ipToInt(addr);
-  return String(ranges).split(/[\s,]+/).filter(Boolean).some((r) => {
-    const [net, bits = '32'] = r.split('/');
-    const mask = Number(bits) === 0 ? 0 : (~0 << (32 - Number(bits))) >>> 0;
-    return (a & mask) === (ipToInt(net) & mask);
-  });
+  const list = ipRangeList(ranges);
+  if (!list) return false;
+  let addr = String(ip || '').replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/, '');
+  if (addr === '::1' && !list.check('::1', 'ipv6')) addr = '127.0.0.1';
+  if (isIPv4(addr)) return list.check(addr, 'ipv4');
+  if (isIPv6(addr)) return list.check(addr, 'ipv6');
+  return false;
 }
 
 export function expenseCategoriesFor(employeeId) {

@@ -1,9 +1,8 @@
 import { Router } from 'express';
-import { isIPv4 } from 'node:net';
 import { all, get, insert, update, run, tx } from '../db.js';
 import { requireRole, canManage } from '../auth.js';
 import { audit, httpError, notify, monthRange, ensureLeaveBalances, round2 } from '../utils.js';
-import { POLICY_KINDS, policyFor, leaveRulesFor, parsePattern, expenseCategoriesFor, attendancePolicyFor } from '../policies.js';
+import { POLICY_KINDS, policyFor, leaveRulesFor, parsePattern, expenseCategoriesFor, attendancePolicyFor, ipRangeList } from '../policies.js';
 
 /**
  * Policies & settings hub: leave plans, holiday lists, weekly-off policies, attendance (tracking) policies and
@@ -26,10 +25,7 @@ const num = (v, { min = 0, max = Infinity, allowNull = true, label = 'Value' } =
 function cleanIpRanges(v) {
   if (v === undefined || v === null || String(v).trim() === '') return null;
   const parts = String(v).split(/[\s,]+/).filter(Boolean);
-  for (const p of parts) {
-    const [ip, bits] = p.split('/');
-    if (!isIPv4(ip) || (bits !== undefined && !(Number(bits) >= 0 && Number(bits) <= 32 && /^\d+$/.test(bits)))) throw httpError(400, `"${p}" is not an IP address or range like 203.0.113.0/24`);
-  }
+  for (const p of parts) if (!ipRangeList(p)) throw httpError(400, `"${p}" is not an IP address or range like 203.0.113.0/24 or 2001:db8::/32`);
   return parts.join(', ');
 }
 const flag = (v) => (v === true || v === 1 || v === '1' || v === 'true' ? 1 : 0);

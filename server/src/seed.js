@@ -450,6 +450,8 @@ export function seed({ reset = true } = {}) {
         notes: 'Strong fundamentals, good communication.', created_at: `${ymd(addDays(today, -between(1, 30)))} 11:00:00`,
       }));
     }
+    // Random stages can leave a stage empty on some dates; keep at least one candidate at offer.
+    if (!get("SELECT id FROM candidates WHERE stage = 'offer' LIMIT 1")) run("UPDATE candidates SET stage = 'offer' WHERE id = ?", candIds.at(-1));
     for (const cid of candIds.filter((_, i) => i % 3 === 0)) {
       const future = rand() < 0.5;
       insert('interviews', {

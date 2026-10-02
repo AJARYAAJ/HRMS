@@ -11,8 +11,8 @@ delete process.env.SMTP_HOST;
 const { seed } = await import('../src/seed.js');
 const { createApp } = await import('../src/app.js');
 const { get, run } = await import('../src/db.js');
-const { ipAllowed } = await import('../src/policies.js');
 const { autoClockOut } = await import('../src/routes/attendance.js');
+const { ipAllowed } = await import('../src/policies.js');
 
 let server;
 let base;
@@ -99,10 +99,22 @@ test('attendance policy: office clock-in limited to IP ranges; validation of ran
   assert.equal(office.status, 400);
   assert.match(office.body.error, /office network/);
   assert.equal((await call('employee', 'POST', 'api/attendance/clock-in', { work_mode: 'remote' })).status, 200); // remote is not IP-limited
-  await call('hr', 'PUT', `api/policies/attendance/${std}`, { allowed_ips: '127.0.0.1, ::1/128'.split(',')[0] });
+  await call('hr', 'PUT', `api/policies/attendance/${std}`, { allowed_ips: '127.0.0.1' });
   run("DELETE FROM attendance WHERE employee_id = 4 AND date = date('now', 'localtime')");
   assert.equal((await call('employee', 'POST', 'api/attendance/clock-in', { work_mode: 'office' })).status, 200); // loopback allowed
+  assert.equal((await call('hr', 'PUT', `api/policies/attendance/${std}`, { allowed_ips: '2001:db8::/32, fd00::1' })).status, 200);
+  assert.equal((await call('hr', 'PUT', `api/policies/attendance/${std}`, { allowed_ips: '10.0.0.0/33' })).status, 400);
   await call('hr', 'PUT', `api/policies/attendance/${std}`, { allowed_ips: '' });
+});
+
+test('ipAllowed matches IPv4, IPv6, mapped and loopback addresses', () => {
+  assert.equal(ipAllowed('10.20.3.4', '10.20.0.0/16'), true);
+  assert.equal(ipAllowed('10.21.3.4', '10.20.0.0/16'), false);
+  assert.equal(ipAllowed('::ffff:10.20.3.4', '10.20.0.0/16'), true);
+  assert.equal(ipAllowed('2001:db8:1::5', '2001:db8::/32'), true);
+  assert.equal(ipAllowed('2001:db9::5', '2001:db8::/32'), false);
+  assert.equal(ipAllowed('::1', '127.0.0.1'), true);
+  assert.equal(ipAllowed('anything', ''), true);
 });
 
 test('automatic clock-out closes forgotten days at shift end', async () => {

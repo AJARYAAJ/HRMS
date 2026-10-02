@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import express, { Router } from 'express';
 import { all, get, insert, update, run, tx } from '../db.js';
 import { requireRole } from '../auth.js';
-import { audit, httpError } from '../utils.js';
+import { audit, httpError, notify, hrIds } from '../utils.js';
 import { attendancePolicyFor } from '../policies.js';
 import { evaluateDay, shiftFor } from './attendance.js';
 
@@ -56,6 +56,7 @@ export function ingest(device, punches) {
   let duplicates = 0;
   let unmatched = 0;
   const days = new Set();
+  const unknown = new Set();
   tx(() => {
     for (const p of punches) {
       const at = normaliseTime(p.time);
@@ -63,6 +64,7 @@ export function ingest(device, punches) {
       if (!at || !bid) continue;
       const emp = get("SELECT id FROM employees WHERE biometric_id = ? AND status != 'exited'", bid);
       if (get('SELECT id FROM punch_logs WHERE device_id IS ? AND biometric_id = ? AND punched_at = ?', device.id, bid, at)) { duplicates++; continue; }
+      if (!emp && !get('SELECT id FROM punch_logs WHERE biometric_id = ? AND employee_id IS NULL LIMIT 1', bid)) unknown.add(bid);
       insert('punch_logs', { device_id: device.id, biometric_id: bid, employee_id: emp?.id ?? null, punched_at: at, direction: ['in', 'out'].includes(p.direction) ? p.direction : null, verify: p.verify || null });
       accepted++;
       if (emp) days.add(`${emp.id}|${at.slice(0, 10)}`); else unmatched++;
@@ -70,6 +72,12 @@ export function ingest(device, punches) {
     for (const k of days) { const [e, d] = k.split('|'); processDay(Number(e), d); }
     run('UPDATE biometric_devices SET last_seen_at = ? WHERE id = ?', new Date().toISOString(), device.id);
   });
+  // Tell HR (bell + push) the first time a device sends punches for a user ID nobody is mapped to.
+  if (unknown.size) {
+    const ids = [...unknown];
+    const body = `${device.name} sent punches for user ID${ids.length > 1 ? 's' : ''} ${ids.slice(0, 5).join(', ')}${ids.length > 5 ? '…' : ''}. Map ${ids.length > 1 ? 'them' : 'it'} to an employee so attendance is marked.`;
+    for (const id of hrIds()) notify(id, 'Unmatched biometric punches', body, '/attendance-devices', { email: false });
+  }
   return { accepted, duplicates, unmatched };
 }
 

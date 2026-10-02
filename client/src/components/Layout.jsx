@@ -11,6 +11,7 @@ import { useAuth, useGet, useAction } from '../lib/hooks';
 import { Avatar, PageSkeleton, cx } from './ui';
 import { timeAgo, fullName } from '../lib/format';
 import CommandPalette from './CommandPalette';
+import { PushPrompt, useNotificationAlerts } from './PushNotifications';
 
 function Brand({ collapsed }) {
   const { data: settings } = useGet('settings');
@@ -96,7 +97,8 @@ function Notifications() {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useClickOutside(ref, () => setOpen(false));
-  const { data } = useGet('notifications', null, { poll: 30000 });
+  const { data, refetch } = useGet('notifications', null, { poll: 20000 });
+  useNotificationAlerts(data, refetch);
   const [act] = useAction();
   const navigate = useNavigate();
   const unread = data?.unread || 0;
@@ -112,6 +114,7 @@ function Notifications() {
             <span className="font-semibold">Notifications</span>
             <button className="btn-ghost btn-sm" onClick={() => act('notifications/read-all')}><CheckCheck size={14} /> Mark all read</button>
           </div>
+          <PushPrompt />
           <div className="max-h-96 overflow-y-auto">
             {!data?.items?.length && <div className="p-6 text-center text-sm muted">You're all caught up 🎉</div>}
             {data?.items?.map((n) => (

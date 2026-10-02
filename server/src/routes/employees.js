@@ -76,6 +76,7 @@ authRouter.post('/change-password', (req, res) => {
   if (!new_password || new_password.length < 8) throw httpError(400, 'New password must be at least 8 characters');
   update('employees', user.id, { password_hash: bcrypt.hashSync(new_password, 10) });
   audit(user.id, 'change_password', 'employees', user.id);
+  notify(user.id, 'Your password was changed', "If this wasn't you, contact HR immediately.", '/profile', { email: false });
   res.json({ ok: true });
 });
 
@@ -113,6 +114,7 @@ export function resetPasswordHandler(req, res) {
   update('employees', row.employee_id, { password_hash: bcrypt.hashSync(password, 10) });
   run("UPDATE password_resets SET used_at = datetime('now') WHERE employee_id = ? AND used_at IS NULL", row.employee_id);
   audit(row.employee_id, 'reset_password_via_email', 'employees', row.employee_id);
+  notify(row.employee_id, 'Your password was changed', "It was reset with an email link. If this wasn't you, contact HR immediately.", '/profile', { email: false });
   emailEmployee(row.employee_id, {
     force: true, template: 'password_changed', subject: 'Your PeopleHub password was changed', heading: 'Password changed',
     paragraphs: ['Your password was just changed using a reset link. If this wasn\'t you, contact HR immediately.'],
@@ -352,6 +354,7 @@ employeesRouter.post('/:id/reset-password', requireRole('admin', 'hr'), (req, re
   const password = req.body.password || 'Welcome@123';
   update('employees', Number(req.params.id), { password_hash: bcrypt.hashSync(password, 10) });
   audit(req.user.id, 'reset_password', 'employees', Number(req.params.id));
+  notify(Number(req.params.id), 'Your password was reset by HR', 'Sign in with the temporary password from your email and change it.', '/profile', { email: false });
   emailEmployee(Number(req.params.id), {
     force: true, template: 'password_reset_by_hr', subject: 'Your PeopleHub password was reset', heading: 'Your password was reset by HR',
     paragraphs: [`${req.user.first_name} ${req.user.last_name} reset your password. Use the temporary password below and change it after signing in.`],

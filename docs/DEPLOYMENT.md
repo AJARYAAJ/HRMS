@@ -295,6 +295,26 @@ See [agent/README.md](../agent/README.md) for what it records, permissions and c
 5. The device shows as **Online** within a few minutes of its first contact. Punches turn into clock-in (first punch)
    and clock-out (last punch) for the day, using the employee's shift and attendance policy.
 
+## Step 11: Browser and phone notifications
+
+Every notification appears in the **bell** inside PeopleHub. It also pops up as a **toast** while the person is on the site,
+and the unread count shows in the browser tab title. Each person can also get notifications **outside the website**, from
+their computer's or phone's notification centre, even when PeopleHub is closed:
+
+1. Click the bell → **Turn on** (or **Profile → Browser & phone notifications → Turn on here**) and allow notifications
+   when the browser asks. **Send a test** confirms it works. Do this once on each computer or phone.
+2. Clicking a notification opens the right page in PeopleHub and marks it read.
+3. Requirements:
+   - The site must be served over **HTTPS**. Steps 2–4 already set that up.
+   - The server must be able to make outbound HTTPS requests to the browser push services
+     (`fcm.googleapis.com`, `*.push.services.mozilla.com`, `*.notify.windows.com`, `*.push.apple.com`).
+   - Works in Chrome, Edge, Firefox and Safari on desktop and Android. On **iPhone/iPad** (iOS 16.4+), first add
+     PeopleHub to the Home Screen (Share → Add to Home Screen), open it from there and turn notifications on.
+4. Nothing to configure: keys are created on first start. To keep the same keys after restoring onto a fresh
+   database, set `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` in `.env` (see `.env.example`).
+5. If someone blocked notifications, they re-allow them from the lock icon in the address bar.
+   **Profile → Browser & phone notifications** lists every device receiving notifications, and each can be removed.
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -303,6 +323,7 @@ See [agent/README.md](../agent/README.md) for what it records, permissions and c
 | "Set JWT_SECRET…" in the logs | Put a 64-character value from `openssl rand -hex 32` in `.env` |
 | "First start in production needs ADMIN_EMAIL…" | Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env`. Only needed while the database is empty |
 | HTTPS certificate error | DNS must point at the server before the first start, and port 80 must be reachable. Check Caddy's logs (`docker compose logs caddy`) or rerun Certbot |
+| No browser notifications | Check the site is on HTTPS and the browser allows notifications for it (lock icon). Use **Profile → Send a test**. If the test fails, the server can't reach the push services; allow outbound HTTPS |
 | Emails not arriving | Use **Settings → Email** for the delivery log and error. Check SMTP credentials and `SMTP_FROM` (quoted) |
 | "Too many failed sign-in attempts" | Wait 15 minutes or use **Forgot password**. The limit is `LOGIN_MAX_FAILURES` (default 10) |
 | Uploads rejected as too large | Raise `MAX_UPLOAD_MB` (default 10), and `client_max_body_size` in Nginx or `max_size` in the Caddyfile |

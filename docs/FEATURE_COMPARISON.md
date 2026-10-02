@@ -40,6 +40,7 @@ Legend: ✅ implemented · ◑ partly implemented (limits noted) · — not impl
 | Late-mark penalties (every N late marks → days from a leave type or LOP), with waivers | Keka | ✅ | Policies → Late-mark penalties |
 | Bulk plan assignment | Keka | ✅ | Policies → Assign to employees |
 | Biometric device integration (ZKTeco / eSSL iclock push, JSON API for other devices), first-in / last-out, unmatched-ID mapping | Keka, Zoho | ✅ | Attendance devices |
+| In-app bell, live toasts, and browser/phone push notifications (even when the site is closed) for every module, with per-device opt-in | Keka, Zoho, We360 | ✅ | Bell · Profile → Browser & phone notifications |
 | Office clock-in limited to office IP ranges | Keka | ✅ | Policies → Attendance |
 | Automatic clock-out when people forget (at shift end, flagged for regularisation) | Keka | ✅ | Policies → Attendance |
 

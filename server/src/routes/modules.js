@@ -9,6 +9,7 @@ import { createEmployee } from './employees.js';
 import { singleFile, removeFile, deleteAttachmentsFor } from '../uploads.js';
 import { saveAttachment } from './attachments.js';
 import { queueEmail } from '../mailer.js';
+import { pushPublicKey, validEndpoint, sendPush } from '../push.js';
 
 const EMP_NAME = (alias) => `${alias}.first_name || ' ' || ${alias}.last_name`;
 
@@ -486,6 +487,42 @@ notificationsRouter.get('/', (req, res) => {
   const items = all('SELECT * FROM notifications WHERE employee_id = ? ORDER BY id DESC LIMIT 50', req.user.id);
   const unread = get('SELECT COUNT(*) AS n FROM notifications WHERE employee_id = ? AND read = 0', req.user.id).n;
   res.json({ items, unread });
+});
+// Browser push: the public key for subscribing, and the browsers/phones this employee enabled.
+const deviceName = (ua = '') => {
+  const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+  const os = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : '';
+  return os ? `${browser} on ${os}` : browser;
+};
+notificationsRouter.get('/push', (req, res) => {
+  const devices = all('SELECT id, endpoint, device, created_at, last_used_at FROM push_subscriptions WHERE employee_id = ? ORDER BY id DESC', req.user.id);
+  res.json({ public_key: pushPublicKey(), devices });
+});
+notificationsRouter.post('/push/subscribe', (req, res) => {
+  const sub = req.body?.subscription || req.body || {};
+  const { endpoint } = sub;
+  const { p256dh, auth } = sub.keys || {};
+  if (!endpoint || !p256dh || !auth) throw httpError(400, 'A push subscription with endpoint and keys is required');
+  if (!validEndpoint(endpoint)) throw httpError(400, 'This push service is not supported');
+  if (!/^[A-Za-z0-9_-]{80,100}={0,2}$/.test(p256dh) || !/^[A-Za-z0-9_-]{16,32}={0,2}$/.test(auth)) throw httpError(400, 'Invalid push subscription keys');
+  const device = String(req.body?.device || deviceName(req.get('user-agent'))).slice(0, 80);
+  // The same browser re-subscribing (or another user signing in on it) takes over the endpoint.
+  run(`INSERT INTO push_subscriptions (employee_id, endpoint, p256dh, auth, device) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(endpoint) DO UPDATE SET employee_id = excluded.employee_id, p256dh = excluded.p256dh, auth = excluded.auth, device = excluded.device, failures = 0`,
+  req.user.id, endpoint, p256dh, auth, device);
+  res.status(201).json({ ok: true, device });
+});
+notificationsRouter.post('/push/unsubscribe', (req, res) => {
+  const { endpoint, id } = req.body || {};
+  if (id) run('DELETE FROM push_subscriptions WHERE id = ? AND employee_id = ?', id, req.user.id);
+  else if (endpoint) run('DELETE FROM push_subscriptions WHERE endpoint = ? AND employee_id = ?', endpoint, req.user.id);
+  else throw httpError(400, 'endpoint or id is required');
+  res.json({ ok: true });
+});
+notificationsRouter.post('/push/test', async (req, res) => {
+  const result = await sendPush(req.user.id, { title: 'Notifications are on', body: 'PeopleHub will alert you here about approvals, payslips, reminders and more.', link: '/', tag: 'peoplehub-test' });
+  if (!result.sent && !result.failed) throw httpError(400, 'Turn on browser notifications on this device first');
+  res.json(result);
 });
 notificationsRouter.post('/read-all', (req, res) => {
   run('UPDATE notifications SET read = 1 WHERE employee_id = ?', req.user.id);

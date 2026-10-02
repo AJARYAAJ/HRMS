@@ -6,6 +6,7 @@ import { PageHeader, CardSkeleton } from '../components/ui';
 import { FormFields } from '../components/Form';
 import { updateUser } from '../store/authSlice';
 import { toggleTheme } from '../store/uiSlice';
+import { PushSettings } from '../components/PushNotifications';
 
 const FIELDS = [
   { name: 'phone', label: 'Phone' }, { name: 'blood_group', label: 'Blood group', type: 'select', options: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'] },
@@ -76,6 +77,7 @@ export default function Profile() {
           </label>
         </div>
       )}
+      <PushSettings />
       <div className="card card-pad flex items-center justify-between">
         <div><h3 className="font-semibold">Appearance</h3><p className="text-sm muted">Switch between light and dark theme.</p></div>
         <button className="btn-secondary" onClick={() => dispatch(toggleTheme())}><Moon size={16} className="dark:hidden" /><Sun size={16} className="hidden dark:block" /> Toggle theme</button>

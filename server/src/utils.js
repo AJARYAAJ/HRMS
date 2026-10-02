@@ -1,6 +1,7 @@
 import { all, get, insert, run } from './db.js';
 import { policyFor, holidayListFilter, weeklyOffChecker, leaveRulesFor, entitlement } from './policies.js';
 import { emailEmployee, appUrl } from './mailer.js';
+import { pushNotification } from './push.js';
 
 export const pad = (n) => String(n).padStart(2, '0');
 export const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -108,7 +109,8 @@ export function computePayslip(annualCtc, workingDays, paidDays, opts = {}) {
 /** In-app notification plus a matching email (unless the employee turned email notifications off). */
 export function notify(employeeId, title, body, link, { email = true } = {}) {
   if (!employeeId) return;
-  insert('notifications', { employee_id: employeeId, title, body, link });
+  const id = insert('notifications', { employee_id: employeeId, title, body, link });
+  pushNotification(employeeId, { id, title, body, link });
   if (email) {
     emailEmployee(employeeId, {
       subject: title,

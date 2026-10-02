@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { X, CheckCircle2, AlertCircle, Info, Inbox, ChevronLeft, ChevronRight } from 'lucide-react';
 import { dismissToast } from '../store/uiSlice';
+import { useNavigate } from 'react-router-dom';
 import { initials, titleCase, monthLabel, shiftMonth } from '../lib/format';
 
 export const cx = (...c) => c.filter(Boolean).join(' ');
@@ -272,16 +273,21 @@ export function Toaster() {
 }
 
 function Toast({ toast, onClose }) {
+  const navigate = useNavigate();
   useEffect(() => {
-    const id = setTimeout(onClose, 3800);
+    const id = setTimeout(onClose, toast.detail ? 7000 : 3800);
     return () => clearTimeout(id);
-  }, [onClose]);
+  }, [onClose, toast.detail]);
   const Icon = toast.type === 'error' ? AlertCircle : toast.type === 'info' ? Info : CheckCircle2;
   const color = toast.type === 'error' ? 'text-rose-500' : toast.type === 'info' ? 'text-sky-500' : 'text-emerald-500';
   return (
     <div role="status" className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xl animate-pop dark:border-slate-700 dark:bg-slate-800">
       <Icon className={cx('mt-0.5 shrink-0', color)} size={18} />
-      <div className="flex-1 text-sm font-medium text-slate-700 dark:text-slate-200">{toast.message}</div>
+      <div className="min-w-0 flex-1 text-sm">
+        <div className="font-medium text-slate-700 dark:text-slate-200">{toast.message}</div>
+        {toast.detail && <div className="mt-0.5 line-clamp-2 text-xs muted">{toast.detail}</div>}
+        {toast.link && <button className="mt-1 text-xs font-semibold text-brand-600 hover:underline dark:text-brand-400" onClick={() => { navigate(toast.link); onClose(); }}>View</button>}
+      </div>
       <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Dismiss"><X size={16} /></button>
     </div>
   );
